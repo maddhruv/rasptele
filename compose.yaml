@@ -1,0 +1,45 @@
+services:
+  rasptele:
+    build: .
+    image: ghcr.io/maddhruv/rasptele:0.1.0
+    env_file:
+      - path: .env
+        required: false
+    command: ["--config", "/config/config.yaml"]
+    depends_on:
+      docker-guard:
+        condition: service_started
+    pid: host
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - rasptele-data:/data
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host:ro
+    restart: unless-stopped
+
+  docker-guard:
+    build: .
+    image: ghcr.io/maddhruv/rasptele:0.1.0
+    command: ["--guard", "--config", "/config/config.yaml"]
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+  rasptele-watchdog:
+    build: .
+    image: ghcr.io/maddhruv/rasptele:0.1.0
+    env_file:
+      - path: .env
+        required: false
+    command: ["--watchdog", "--config", "/config/config.yaml"]
+    depends_on:
+      docker-guard:
+        condition: service_started
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+    restart: unless-stopped
+
+volumes:
+  rasptele-data:

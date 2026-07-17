@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+config.yaml
+data/
+.git/
+.github/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+*.sqlite*
+dist/
+build/
+*.egg-info/
