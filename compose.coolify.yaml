@@ -1,0 +1,45 @@
+services:
+  rasptele:
+    build: .
+    image: ghcr.io/maddhruv/rasptele:0.1.0
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?required}
+      TELEGRAM_ALLOWED_USER_ID: ${TELEGRAM_ALLOWED_USER_ID:?required}
+    command: ["--config", "/config/config.yaml"]
+    depends_on:
+      docker-guard:
+        condition: service_started
+    pid: host
+    volumes:
+      - /opt/rasptele/config.yaml:/config/config.yaml:ro
+      - rasptele-data:/data
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host:ro
+    restart: unless-stopped
+
+  docker-guard:
+    build: .
+    image: ghcr.io/maddhruv/rasptele:0.1.0
+    command: ["--guard", "--config", "/config/config.yaml"]
+    volumes:
+      - /opt/rasptele/config.yaml:/config/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+  rasptele-watchdog:
+    build: .
+    image: ghcr.io/maddhruv/rasptele:0.1.0
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?required}
+      TELEGRAM_ALLOWED_USER_ID: ${TELEGRAM_ALLOWED_USER_ID:?required}
+    command: ["--watchdog", "--config", "/config/config.yaml"]
+    depends_on:
+      docker-guard:
+        condition: service_started
+    volumes:
+      - /opt/rasptele/config.yaml:/config/config.yaml:ro
+    restart: unless-stopped
+
+volumes:
+  rasptele-data:

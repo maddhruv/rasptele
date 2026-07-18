@@ -102,16 +102,58 @@ docker compose up -d --build
 
 ## Deploy with Coolify
 
-Use a **Docker Compose** resource that points at this repository. Rasptele needs host-level Docker and metric mounts, so deploy it only to the Raspberry Pi server it is meant to manage.
+Deploy the Git repository as a **Docker Compose** resource on the Raspberry Pi that Rasptele will manage. Use `compose.coolify.yaml`; its `build: .` entries make Coolify build the image from the selected Git revision. The `image:` values name the resulting local images and do not require GitHub Container Registry (GHCR) access.
 
-1. Create a persistent configuration file from `config.example.yaml` and mount it at `/config/config.yaml` in all three services.
-2. Add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_ID` as runtime secrets for the `rasptele` and `rasptele-watchdog` services.
-3. Keep the `rasptele-data` volume mounted at `/data`.
-4. Keep `/var/run/docker.sock` mounted only in `docker-guard`.
-5. Preserve the read-only `/proc`, `/sys`, and `/` mounts on `rasptele`.
-6. Do not assign a domain or publish a port for any service.
+This is the recommended deployment path because Rasptele requires three services, host mounts, the Docker socket, runtime secrets, and persistent storage. A standalone container image does not describe those resources.
 
-The supplied `compose.yaml` is the source of truth for mounts and service boundaries. A Coolify deployment must preserve those boundaries rather than flattening the services into one container.
+Before deploying, commit and push `compose.coolify.yaml` and the revision you intend Coolify to run. Connect the repository through the Coolify GitHub App and enable automatic deployments if pushes to `main` should redeploy Rasptele.
+
+### Create the persistent configuration
+
+Create the configuration directly on the Pi:
+
+```sh
+sudo install -d -m 700 /opt/rasptele
+sudo install -m 600 /dev/null /opt/rasptele/config.yaml
+sudo editor /opt/rasptele/config.yaml
+```
+
+Copy the non-secret settings from `config.example.yaml` into that file and adjust the container restart allowlist.
+
+### Configure the Coolify resource
+
+Create the resource with these values:
+
+- Repository: this GitHub repository.
+- Branch: `main`.
+- Compose file: `/compose.coolify.yaml`.
+- Destination server: the Raspberry Pi.
+- Runtime variables: `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_ID`.
+
+Keep both Telegram values runtime-only. Do not assign a domain or publish a port for any service. Deploy only on a dedicated, trusted Pi because the stack reads host metrics and `docker-guard` controls allowlisted containers through the Docker socket.
+
+The Coolify Compose file keeps `/var/run/docker.sock` exclusive to `docker-guard`, mounts host metrics read-only into `rasptele`, and persists SQLite data in `rasptele-data`. Keep these service boundaries intact.
+
+After deployment, confirm that `rasptele`, `docker-guard`, and `rasptele-watchdog` remain running. Open the `rasptele` logs in Coolify, then send `/start` and `/status` to the bot in a private Telegram chat.
+
+### Publish optional GHCR images
+
+GHCR images are optional for the recommended source deployment. GitHub Actions publishes ARM64 and AMD64 images only when a version tag matching `v*` is pushed:
+
+```sh
+git tag v0.1.0
+git push origin main v0.1.0
+```
+
+For `v0.1.0`, the workflow publishes these tags:
+
+```text
+ghcr.io/maddhruv/rasptele:0.1.0
+ghcr.io/maddhruv/rasptele:0.1
+ghcr.io/maddhruv/rasptele:v0.1.0
+```
+
+An image-only deployment still needs a Compose definition with the same three services, mounts, secrets, and volume. It must also authenticate to GHCR when the package is private.
 
 ## Use Rasptele from Telegram
 
@@ -223,7 +265,8 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ```text
 src/rasptele/       Bot, monitoring, watchdog, configuration, SQLite store, and Docker guard
-compose.yaml        Three-service production deployment
+compose.yaml        Three-service local production deployment
+compose.coolify.yaml Coolify deployment using persistent host configuration
 config.example.yaml Reviewable non-secret configuration template
 .env.example        Secret environment-variable template
 tests/              Configuration, incident, and confirmation tests

@@ -23,6 +23,7 @@ jobs:
       - run: mypy --ignore-missing-imports src
       - run: python -m unittest discover -s tests -v
       - run: cp config.example.yaml config.yaml && docker compose config --quiet
+      - run: TELEGRAM_BOT_TOKEN=ci-token TELEGRAM_ALLOWED_USER_ID=1 docker compose -f compose.coolify.yaml config --quiet
 
   image:
     runs-on: ubuntu-latest
