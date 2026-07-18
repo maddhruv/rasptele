@@ -22,53 +22,66 @@ Rasptele v1 provides:
 
 Pi-hole, qBittorrent, Jellyfin, Coolify, and OpenWrt integrations are not implemented yet.
 
-## Quickstart
+<p align="center">
+  <img src="assets/screenshots/telegram-status.png" alt="Rasptele Telegram bot showing Raspberry Pi CPU, RAM, temperature, disk, and container health" width="760">
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/telegram-containers.png" alt="Rasptele Telegram bot showing running Docker containers as inline keyboard buttons" width="520">
+</p>
+
+## Choose a deployment method
+
+Rasptele always runs the same three services. Choose the deployment method that matches how you manage Docker on the Raspberry Pi:
+
+| Method | Source | Compose file | Use when |
+| --- | --- | --- | --- |
+| Plain Docker Compose | Local Git checkout and local build | `compose.yaml` | You manage the Pi over SSH. |
+| Coolify | Git repository and Coolify build | `compose.coolify.yaml` | Coolify manages deployments from Git. |
+| Portainer | Released image from GHCR | `compose.portainer.yaml` | Portainer manages stacks and image updates. |
+
+All methods require Docker on a 64-bit Raspberry Pi, outbound access to Telegram, and the same BotFather token and numeric Telegram user ID. None publishes an inbound port.
+
+## Create the Telegram credentials
 
 These steps target a Raspberry Pi 5 running a 64-bit Linux distribution with Docker Engine and the Docker Compose plugin.
 
-### 1. Clone the repository
+1. In Telegram, open `@BotFather`, run `/newbot`, and save the token it gives you.
+2. Send a message to your new bot. It will not reply until Rasptele is deployed, but Telegram will record the update.
+3. Query Telegram for the message you sent, replacing the placeholder with the BotFather token:
+
+   ```sh
+   curl -s "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getUpdates"
+   ```
+
+4. Find `message.from.id` in the response. Save that positive integer as `TELEGRAM_ALLOWED_USER_ID`.
+
+The BotFather token is `TELEGRAM_BOT_TOKEN`. Its numeric prefix identifies the bot, so Rasptele does not require a separate bot ID.
+
+## Deploy with plain Docker Compose
+
+Use this path when you manage the Pi over SSH and want Docker to build the image from a local checkout.
+
+### Clone and configure the repository
 
 ```sh
 git clone https://github.com/maddhruv/rasptele.git
 cd rasptele
-```
-
-### 2. Create a Telegram bot and find your user ID
-
-1. In Telegram, open `@BotFather`, run `/newbot`, and save the token it gives you.
-2. Send a message to your new bot. It will not reply until Rasptele is deployed, but Telegram will record the update.
-3. Create the secret file:
-
-   ```sh
-   cp .env.example .env
-   chmod 600 .env
-   ```
-
-4. To get your numeric Telegram user ID, load the token into the current shell and query your bot's updates:
-
-   ```sh
-   set -a
-   . ./.env
-   set +a
-   curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates"
-   ```
-
-   Find `message.from.id` in the JSON response. Add the token and that numeric ID to `.env`:
-
-   ```dotenv
-   TELEGRAM_BOT_TOKEN=123456789:replace-with-your-token
-   TELEGRAM_ALLOWED_USER_ID=123456789
-   ```
-
-Keep `.env` private. It is ignored by Git and Docker build contexts and must never be committed.
-
-### 3. Configure Rasptele
-
-```sh
+cp .env.example .env
+chmod 600 .env
 cp config.example.yaml config.yaml
 ```
 
-Edit `config.yaml`. The most important setting is the restart allowlist. Rasptele shows every container, but only names in this list receive a restart button.
+Edit `.env`:
+
+```dotenv
+TELEGRAM_BOT_TOKEN=123456789:replace-with-your-token
+TELEGRAM_ALLOWED_USER_ID=123456789
+```
+
+Keep `.env` private. It is ignored by Git and Docker build contexts and must never be committed.
+
+Edit `config.yaml`. Rasptele shows every container, but only exact names in the restart allowlist receive a restart button:
 
 ```yaml
 containers:
@@ -77,13 +90,13 @@ containers:
     - jellyfin
 ```
 
-Use exact Docker container names. Check them before deployment:
+List the exact names on the Pi:
 
 ```sh
 docker ps --format '{{.Names}}'
 ```
 
-### 4. Deploy
+### Start the stack
 
 ```sh
 docker compose up -d --build
@@ -91,7 +104,7 @@ docker compose ps
 docker compose logs -f rasptele
 ```
 
-All three services should remain running. Send `/start` to the bot in a private chat, then run `/status`.
+Confirm that `rasptele`, `docker-guard`, and `rasptele-watchdog` remain running. Send `/start` to the bot in a private chat, then run `/status`.
 
 To update a source checkout later, pull the revision you intend to deploy and rebuild:
 
@@ -108,7 +121,7 @@ This is the recommended deployment path because Rasptele requires three services
 
 Before deploying, commit and push `compose.coolify.yaml` and the revision you intend Coolify to run. Connect the repository through the Coolify GitHub App and enable automatic deployments if pushes to `main` should redeploy Rasptele.
 
-### Create the persistent configuration
+### Create the persistent configuration on the Pi
 
 Create the configuration directly on the Pi:
 
@@ -118,7 +131,7 @@ sudo install -m 600 /dev/null /opt/rasptele/config.yaml
 sudo editor /opt/rasptele/config.yaml
 ```
 
-Copy the non-secret settings from `config.example.yaml` into that file and adjust the container restart allowlist.
+Copy the contents of `config.example.yaml` into that file and adjust the container restart allowlist. Keep `docker_guard_url` set to `http://docker-guard:8080`.
 
 ### Configure the Coolify resource
 
@@ -136,9 +149,50 @@ The Coolify Compose file keeps `/var/run/docker.sock` exclusive to `docker-guard
 
 After deployment, confirm that `rasptele`, `docker-guard`, and `rasptele-watchdog` remain running. Open the `rasptele` logs in Coolify, then send `/start` and `/status` to the bot in a private Telegram chat.
 
-### Publish optional GHCR images
+## Deploy with Portainer
 
-GHCR images are optional for the recommended source deployment. GitHub Actions publishes ARM64 and AMD64 images only when a version tag matching `v*` is pushed:
+Use `compose.portainer.yaml` to deploy the released multi-architecture image from GitHub Container Registry (GHCR). Portainer does not build the source repository in this path.
+
+The package currently rejects anonymous pulls. Before creating the stack, choose one of these access methods:
+
+- Make the `rasptele` package public in the GitHub package settings.
+- In Portainer, open **Registries**, add `ghcr.io`, and authenticate with your GitHub username and a personal access token that has `read:packages` permission.
+
+### Create the persistent configuration on the Pi
+
+Create the configuration on the Docker host before Portainer creates the stack:
+
+```sh
+sudo install -d -m 700 /opt/rasptele
+sudo install -m 600 /dev/null /opt/rasptele/config.yaml
+sudo editor /opt/rasptele/config.yaml
+```
+
+Copy the contents of `config.example.yaml` into that file and adjust the container restart allowlist. Keep `docker_guard_url` set to `http://docker-guard:8080`.
+
+### Create the Portainer stack
+
+1. Open **Stacks**, then select **Add stack**.
+2. Select **Repository** as the build method.
+3. Set the repository URL to `https://github.com/maddhruv/rasptele`.
+4. Set the repository reference to `refs/heads/main`.
+5. Set the Compose path to `compose.portainer.yaml`.
+6. Add these environment variables:
+
+   ```dotenv
+   TELEGRAM_BOT_TOKEN=123456789:replace-with-your-token
+   TELEGRAM_ALLOWED_USER_ID=123456789
+   ```
+
+7. Deploy the stack without publishing ports.
+
+Portainer pulls `ghcr.io/maddhruv/rasptele:0.1.0` for all three services. Confirm all three containers remain running, inspect the `rasptele` logs, and test `/start` and `/status`.
+
+To deploy a newer release, update the three `image:` tags in `compose.portainer.yaml`, commit the change, and redeploy or pull and recreate the stack in Portainer.
+
+## Publish a GHCR release
+
+Coolify and plain Docker Compose build from source, so neither requires a published image. Portainer uses the released image. GitHub Actions publishes ARM64 and AMD64 images when a version tag matching `v*` is pushed:
 
 ```sh
 git tag v0.1.0
@@ -153,7 +207,7 @@ ghcr.io/maddhruv/rasptele:0.1
 ghcr.io/maddhruv/rasptele:v0.1.0
 ```
 
-An image-only deployment still needs a Compose definition with the same three services, mounts, secrets, and volume. It must also authenticate to GHCR when the package is private.
+The image does not replace the Compose definition. Every deployment still needs the same three services, mounts, secrets, and persistent volume.
 
 ## Use Rasptele from Telegram
 
@@ -183,7 +237,7 @@ Commands outside the configured user's private chat are ignored. The attempt is 
 | `containers.restart_allowed` | `[]` | Exact Docker container names that may be restarted after confirmation. |
 | `docker_guard_url` | `http://docker-guard:8080` | Internal Docker guard URL. Do not expose it publicly. |
 
-The bot reads these required values from `.env`:
+The bot reads these required environment variables from `.env`, Coolify, or Portainer:
 
 | Variable | Description |
 | --- | --- |
@@ -267,6 +321,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 src/rasptele/       Bot, monitoring, watchdog, configuration, SQLite store, and Docker guard
 compose.yaml        Three-service local production deployment
 compose.coolify.yaml Coolify deployment using persistent host configuration
+compose.portainer.yaml Portainer deployment using the released GHCR image
 config.example.yaml Reviewable non-secret configuration template
 .env.example        Secret environment-variable template
 tests/              Configuration, incident, and confirmation tests

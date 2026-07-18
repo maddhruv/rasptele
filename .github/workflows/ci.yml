@@ -24,6 +24,7 @@ jobs:
       - run: python -m unittest discover -s tests -v
       - run: cp config.example.yaml config.yaml && docker compose config --quiet
       - run: TELEGRAM_BOT_TOKEN=ci-token TELEGRAM_ALLOWED_USER_ID=1 docker compose -f compose.coolify.yaml config --quiet
+      - run: TELEGRAM_BOT_TOKEN=ci-token TELEGRAM_ALLOWED_USER_ID=1 docker compose -f compose.portainer.yaml config --quiet
 
   image:
     runs-on: ubuntu-latest
@@ -37,7 +38,7 @@ jobs:
           push: false
           load: true
           tags: rasptele:ci
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: aquasecurity/trivy-action@v0.28.0
         with:
           image-ref: rasptele:ci
           format: table
