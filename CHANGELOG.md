@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-19
+
 ### Changed
 
 - Consolidated Docker Compose, Portainer, and Coolify deployment into one pinned release manifest.
@@ -49,7 +51,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Docker guard sidecar and independent watchdog services.
 - Docker Compose and Coolify deployment definitions.
 
-[Unreleased]: https://github.com/maddhruv/rasptele/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/maddhruv/rasptele/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/maddhruv/rasptele/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/maddhruv/rasptele/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/maddhruv/rasptele/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/maddhruv/rasptele/releases/tag/v0.1.0

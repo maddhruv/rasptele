@@ -7,7 +7,7 @@ Every supported platform uses the repository's single `compose.yaml` and an exac
 Clone an exact release and create `.env`:
 
 ```bash
-git clone --branch v0.2.0 --depth 1 https://github.com/maddhruv/rasptele.git
+git clone --branch v0.3.0 --depth 1 https://github.com/maddhruv/rasptele.git
 cd rasptele
 cp .env.example .env
 ```
@@ -24,7 +24,7 @@ docker compose ps
 Create a Git repository-backed stack:
 
 - Repository: `https://github.com/maddhruv/rasptele`
-- Repository reference: an exact tag such as `refs/tags/v0.2.0`
+- Repository reference: an exact tag such as `refs/tags/v0.3.0`
 - Compose path: `compose.yaml`
 
 Add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_ID` in the stack environment-variable form. Add any optional variables from the [configuration reference](configuration.md), then deploy.
@@ -34,7 +34,7 @@ Add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_ID` in the stack environment
 Create a **Docker Compose** resource:
 
 - Repository: `https://github.com/maddhruv/rasptele`
-- Git reference: an exact tag such as `v0.2.0`
+- Git reference: an exact tag such as `v0.3.0`
 - Base directory: `/`
 - Compose location: `/compose.yaml`
 

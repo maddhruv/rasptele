@@ -17,7 +17,7 @@ Read `result[].message.from.id` from the response.
 Use an exact release tag so both the Compose definition and image version are immutable. Release-it keeps this example synchronized with the release containing these instructions:
 
 ```bash
-git clone --branch v0.2.0 --depth 1 https://github.com/maddhruv/rasptele.git
+git clone --branch v0.3.0 --depth 1 https://github.com/maddhruv/rasptele.git
 cd rasptele
 cp .env.example .env
 chmod 600 .env

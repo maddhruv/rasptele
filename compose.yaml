@@ -1,6 +1,6 @@
 services:
   rasptele:
-    image: ghcr.io/maddhruv/rasptele:0.2.0
+    image: ghcr.io/maddhruv/rasptele:0.3.0
     pull_policy: always
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?required}
@@ -25,7 +25,7 @@ services:
     restart: unless-stopped
 
   docker-guard:
-    image: ghcr.io/maddhruv/rasptele:0.2.0
+    image: ghcr.io/maddhruv/rasptele:0.3.0
     pull_policy: always
     environment:
       RASPTELE_RESTART_ALLOWED: ${RASPTELE_RESTART_ALLOWED:-}
@@ -35,7 +35,7 @@ services:
     restart: unless-stopped
 
   rasptele-watchdog:
-    image: ghcr.io/maddhruv/rasptele:0.2.0
+    image: ghcr.io/maddhruv/rasptele:0.3.0
     pull_policy: always
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?required}
