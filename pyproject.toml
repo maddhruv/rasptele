@@ -28,9 +28,11 @@ dependencies = [
   "fastapi>=0.110,<1",
   "httpx>=0.27,<1",
   "psutil>=5.9,<7",
-  "PyYAML>=6,<7",
   "uvicorn[standard]>=0.27,<1",
 ]
+
+[project.optional-dependencies]
+test = ["PyYAML>=6,<7"]
 
 [project.scripts]
 rasptele = "rasptele.main:main"

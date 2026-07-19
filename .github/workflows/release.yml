@@ -5,7 +5,7 @@ on:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: test "$RELEASE_TAG" = "v$(node -p "require('./package.json').version")"
-      - run: pip install . ruff mypy
+      - run: pip install '.[test]' ruff mypy
       - run: ruff check src tests
       - run: mypy --ignore-missing-imports src
       - run: python -m unittest discover -s tests -v
@@ -28,28 +28,27 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ci-token
           TELEGRAM_ALLOWED_USER_ID: "1"
-          PIHOLE_PASSWORD: ci-pihole-password
         run: |
-          for file in compose.yaml compose.coolify.yaml compose.portainer.yaml; do
-            rendered="$(docker compose -f "$file" config --format json)"
-            jq -e '
-              .services.rasptele.environment
-                | has("TELEGRAM_BOT_TOKEN")
-                  and has("TELEGRAM_ALLOWED_USER_ID")
-                  and has("PIHOLE_PASSWORD")
-            ' <<<"$rendered"
-            jq -e '
-              .services["docker-guard"].environment // {}
-                | (has("TELEGRAM_BOT_TOKEN") or has("TELEGRAM_ALLOWED_USER_ID") or has("PIHOLE_PASSWORD"))
-                  | not
-            ' <<<"$rendered"
-            jq -e '
-              .services["rasptele-watchdog"].environment
-                | has("TELEGRAM_BOT_TOKEN")
-                  and has("TELEGRAM_ALLOWED_USER_ID")
-                  and (has("PIHOLE_PASSWORD") | not)
-            ' <<<"$rendered"
-          done
+          rendered="$(docker compose config --format json)"
+          jq -e '
+            .services.rasptele.environment
+              | has("TELEGRAM_BOT_TOKEN")
+                and has("TELEGRAM_ALLOWED_USER_ID")
+                and has("PIHOLE_URL")
+                and has("PIHOLE_PASSWORD")
+                and has("RASPTELE_RESTART_ALLOWED")
+          ' <<<"$rendered"
+          jq -e '
+            .services["docker-guard"].environment
+              | keys == ["RASPTELE_RESTART_ALLOWED"]
+          ' <<<"$rendered"
+          jq -e '
+            .services["rasptele-watchdog"].environment
+              | has("TELEGRAM_BOT_TOKEN")
+                and has("TELEGRAM_ALLOWED_USER_ID")
+                and has("RASPTELE_MONITOR_INTERVAL_SECONDS")
+                and ((has("PIHOLE_URL") or has("PIHOLE_PASSWORD")) | not)
+          ' <<<"$rendered"
 
   image:
     runs-on: ubuntu-latest
@@ -93,6 +92,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=${{ github.ref_name }}
+            type=raw,value=latest
       - uses: docker/build-push-action@v6
         with:
           context: .

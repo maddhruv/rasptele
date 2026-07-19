@@ -12,3 +12,4 @@ build/
 *.egg-info/
 node_modules/
 .absolute-work/
+docs/plans/

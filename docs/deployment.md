@@ -1,117 +1,72 @@
 # Deploy and update Rasptele
 
-Use these guides when moving Rasptele to a Raspberry Pi or updating an existing installation. Every deployment runs the same three services and publishes no inbound port.
+Every supported platform uses the repository's single `compose.yaml` and an exact released GHCR image. No configuration file, source build, domain, or published port is required.
 
-## Prerequisites
+## Deploy with Docker Compose
 
-- Docker on a 64-bit Raspberry Pi
-- A BotFather token and numeric Telegram user ID
-- A prepared `.env` and `config.yaml` as described in [the first deployment tutorial](getting-started.md)
-- A reachable Pi-hole v6 instance and application password when the integration is enabled
-
-## Deploy from a local checkout
-
-Use `compose.yaml` when you manage the Raspberry Pi over Secure Shell (SSH) and build from source.
-
-### 1. Start the stack
+Clone an exact release and create `.env`:
 
 ```bash
-docker compose up -d --build
+git clone --branch v0.2.0 --depth 1 https://github.com/maddhruv/rasptele.git
+cd rasptele
+cp .env.example .env
+```
+
+Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_ID`, then run:
+
+```bash
+docker compose up -d
 docker compose ps
 ```
-
-### 2. Verify the deployment
-
-Confirm that `rasptele`, `docker-guard`, and `rasptele-watchdog` remain running. Send `/start` and `/status` to the bot in a private chat. Send `/pihole` when the integration is configured.
-
-### 3. Update the deployment
-
-Pull the revision you intend to run and rebuild all services:
-
-```bash
-git pull --ff-only
-docker compose up -d --build
-docker compose ps
-```
-
-## Deploy with Coolify
-
-Use `compose.coolify.yaml` to let Coolify build the image from a selected Git revision.
-
-### 1. Create persistent configuration
-
-Create the configuration file directly on the Raspberry Pi:
-
-```bash
-sudo install -d -m 700 /opt/rasptele
-sudo install -m 600 /dev/null /opt/rasptele/config.yaml
-sudo editor /opt/rasptele/config.yaml
-```
-
-Copy the relevant settings from `config.example.yaml`. Keep `docker_guard_url` set to `http://docker-guard:8080`.
-
-### 2. Configure the resource
-
-Create a **Docker Compose** resource with these values:
-
-- Repository: `https://github.com/maddhruv/rasptele`
-- Branch: `main` or a release tag
-- Compose file: `/compose.coolify.yaml`
-- Destination: the Raspberry Pi
-- Runtime variables: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_ID`, and `PIHOLE_PASSWORD`
-
-Set `PIHOLE_PASSWORD=not-configured` when `integrations.pihole` is absent from `config.yaml`. Do not assign a domain or publish a port.
-
-### 3. Verify the deployment
-
-Confirm that all three services remain running. Open the `rasptele` logs in Coolify, then send `/start` and `/status` to the bot.
 
 ## Deploy with Portainer
 
-Use `compose.portainer.yaml` to pull the released multi-architecture image from GitHub Container Registry (GHCR).
+Create a Git repository-backed stack:
 
-Before creating the stack, confirm that Portainer can pull `ghcr.io/maddhruv/rasptele`. Make the package public in its GitHub package settings, or add `ghcr.io` under **Registries** in Portainer with a GitHub personal access token that has `read:packages` permission.
+- Repository: `https://github.com/maddhruv/rasptele`
+- Repository reference: an exact tag such as `refs/tags/v0.2.0`
+- Compose path: `compose.yaml`
 
-### 1. Create persistent configuration
+Add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_ID` in the stack environment-variable form. Add any optional variables from the [configuration reference](configuration.md), then deploy.
 
-Create `/opt/rasptele/config.yaml` on the Docker host as described in the Coolify guide above.
+## Deploy with Coolify
 
-### 2. Create the stack
+Create a **Docker Compose** resource:
 
-In Portainer, open **Stacks**, select **Add stack**, then select **Repository**. Configure these values:
+- Repository: `https://github.com/maddhruv/rasptele`
+- Git reference: an exact tag such as `v0.2.0`
+- Base directory: `/`
+- Compose location: `/compose.yaml`
 
-- Repository URL: `https://github.com/maddhruv/rasptele`
-- Repository reference: `refs/heads/main`
-- Compose path: `compose.portainer.yaml`
+Add required and desired optional variables under **Environment Variables**. Leave domains, custom build/start commands, and pre/post-deployment commands empty. Disable automatic deployments so updates remain deliberate.
 
-Add the required environment variables:
+## Update deterministically
 
-```dotenv
-TELEGRAM_BOT_TOKEN=<TELEGRAM_BOT_TOKEN>
-TELEGRAM_ALLOWED_USER_ID=<TELEGRAM_ALLOWED_USER_ID>
-PIHOLE_PASSWORD=<PIHOLE_PASSWORD_OR_PLACEHOLDER>
-```
-
-Deploy the stack without publishing ports.
-
-### 3. Verify the deployment
-
-Confirm that all three services remain running. Inspect the `rasptele` logs, then send `/start` and `/status` to the bot.
-
-### 4. Update the deployment
-
-Update all three `image:` tags in `compose.portainer.yaml` to the same release. Pull and redeploy the stack from Portainer.
-
-## Verify secret boundaries
-
-Only `rasptele` receives `PIHOLE_PASSWORD`. The watchdog receives the Telegram credentials, while `docker-guard` receives none of these secrets.
-
-Render any Compose file to inspect the resolved boundary:
+Wait for the desired GitHub Release to be published. For Docker Compose, fetch and switch to its exact tag, then pull and recreate:
 
 ```bash
-docker compose -f compose.yaml config
-docker compose -f compose.coolify.yaml config
-docker compose -f compose.portainer.yaml config
+git fetch --tags
+git switch --detach <NEW_RELEASE_TAG>
+docker compose pull
+docker compose up -d
 ```
 
-See the [configuration reference](configuration.md) for every setting and secret.
+In Portainer or Coolify, change the Git reference to the new exact release tag, reload the Compose definition, and redeploy. All three services must show the same version.
+
+An ordinary restart does not pull a newer image. `pull_policy: always` checks the selected tag during deploy/recreation, but the canonical exact tag never moves.
+
+## Optional `latest` channel
+
+Stable releases also publish `ghcr.io/maddhruv/rasptele:latest`. Users may replace all three exact image tags with `latest`, but updates still require pull plus recreation. Exact tags remain recommended because they identify the running version and make rollback deterministic.
+
+## Roll back
+
+Select a prior env-only release tag and redeploy. The persistent `rasptele-data` volume remains in place:
+
+```bash
+git switch --detach <PRIOR_ENV_ONLY_RELEASE_TAG>
+docker compose pull
+docker compose up -d
+```
+
+Releases from before the env-only migration used a required YAML file and different Compose manifests. Crossing that boundary is not a direct tag switch: restore the selected release's `config.example.yaml` as `config.yaml` and follow its matching deployment documentation. Prefer rolling back only between env-only releases.

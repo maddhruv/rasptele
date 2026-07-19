@@ -1,18 +1,23 @@
 services:
   rasptele:
-    build: .
     image: ghcr.io/maddhruv/rasptele:0.2.0
+    pull_policy: always
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?required}
       TELEGRAM_ALLOWED_USER_ID: ${TELEGRAM_ALLOWED_USER_ID:?required}
-      PIHOLE_PASSWORD: ${PIHOLE_PASSWORD:?required}
-    command: ["--config", "/config/config.yaml"]
+      PIHOLE_URL: ${PIHOLE_URL:-}
+      PIHOLE_PASSWORD: ${PIHOLE_PASSWORD:-}
+      RASPTELE_RESTART_ALLOWED: ${RASPTELE_RESTART_ALLOWED:-}
+      RASPTELE_MONITOR_INTERVAL_SECONDS: ${RASPTELE_MONITOR_INTERVAL_SECONDS:-60}
+      RASPTELE_REMINDER_INTERVAL_MINUTES: ${RASPTELE_REMINDER_INTERVAL_MINUTES:-30}
+      RASPTELE_AUDIT_RETENTION_DAYS: ${RASPTELE_AUDIT_RETENTION_DAYS:-90}
+      RASPTELE_DISK_PERCENT: ${RASPTELE_DISK_PERCENT:-90}
+      RASPTELE_TEMPERATURE_CELSIUS: ${RASPTELE_TEMPERATURE_CELSIUS:-80}
     depends_on:
       docker-guard:
         condition: service_started
     pid: host
     volumes:
-      - ./config.yaml:/config/config.yaml:ro
       - rasptele-data:/data
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
@@ -20,26 +25,26 @@ services:
     restart: unless-stopped
 
   docker-guard:
-    build: .
     image: ghcr.io/maddhruv/rasptele:0.2.0
-    command: ["--guard", "--config", "/config/config.yaml"]
+    pull_policy: always
+    environment:
+      RASPTELE_RESTART_ALLOWED: ${RASPTELE_RESTART_ALLOWED:-}
+    command: ["--guard"]
     volumes:
-      - ./config.yaml:/config/config.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
   rasptele-watchdog:
-    build: .
     image: ghcr.io/maddhruv/rasptele:0.2.0
+    pull_policy: always
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?required}
       TELEGRAM_ALLOWED_USER_ID: ${TELEGRAM_ALLOWED_USER_ID:?required}
-    command: ["--watchdog", "--config", "/config/config.yaml"]
+      RASPTELE_MONITOR_INTERVAL_SECONDS: ${RASPTELE_MONITOR_INTERVAL_SECONDS:-60}
+    command: ["--watchdog"]
     depends_on:
       docker-guard:
         condition: service_started
-    volumes:
-      - ./config.yaml:/config/config.yaml:ro
     restart: unless-stopped
 
 volumes:

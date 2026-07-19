@@ -21,7 +21,7 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - run: pip install . ruff mypy
+      - run: pip install '.[test]' ruff mypy
       - run: ruff check src tests
       - run: mypy --ignore-missing-imports src
       - run: python -m unittest discover -s tests -v
@@ -29,28 +29,77 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ci-token
           TELEGRAM_ALLOWED_USER_ID: "1"
-          PIHOLE_PASSWORD: ci-pihole-password
         run: |
-          for file in compose.yaml compose.coolify.yaml compose.portainer.yaml; do
-            rendered="$(docker compose -f "$file" config --format json)"
-            jq -e '
-              .services.rasptele.environment
-                | has("TELEGRAM_BOT_TOKEN")
-                  and has("TELEGRAM_ALLOWED_USER_ID")
-                  and has("PIHOLE_PASSWORD")
-            ' <<<"$rendered"
-            jq -e '
-              .services["docker-guard"].environment // {}
-                | (has("TELEGRAM_BOT_TOKEN") or has("TELEGRAM_ALLOWED_USER_ID") or has("PIHOLE_PASSWORD"))
-                  | not
-            ' <<<"$rendered"
-            jq -e '
-              .services["rasptele-watchdog"].environment
-                | has("TELEGRAM_BOT_TOKEN")
-                  and has("TELEGRAM_ALLOWED_USER_ID")
-                  and (has("PIHOLE_PASSWORD") | not)
-            ' <<<"$rendered"
-          done
+          rendered="$(docker compose config --format json)"
+          jq -e '
+            .services.rasptele.environment
+              | has("TELEGRAM_BOT_TOKEN")
+                and has("TELEGRAM_ALLOWED_USER_ID")
+                and has("PIHOLE_URL")
+                and has("PIHOLE_PASSWORD")
+                and has("RASPTELE_RESTART_ALLOWED")
+          ' <<<"$rendered"
+          jq -e '
+            .services["docker-guard"].environment
+              | keys == ["RASPTELE_RESTART_ALLOWED"]
+          ' <<<"$rendered"
+          jq -e '
+            .services["rasptele-watchdog"].environment
+              | has("TELEGRAM_BOT_TOKEN")
+                and has("TELEGRAM_ALLOWED_USER_ID")
+                and has("RASPTELE_MONITOR_INTERVAL_SECONDS")
+                and ((has("PIHOLE_URL") or has("PIHOLE_PASSWORD")) | not)
+          ' <<<"$rendered"
+          jq -e '
+            .services.rasptele.environment
+              | .PIHOLE_URL == ""
+                and .PIHOLE_PASSWORD == ""
+                and .RASPTELE_RESTART_ALLOWED == ""
+                and .RASPTELE_MONITOR_INTERVAL_SECONDS == "60"
+                and .RASPTELE_REMINDER_INTERVAL_MINUTES == "30"
+                and .RASPTELE_AUDIT_RETENTION_DAYS == "90"
+                and .RASPTELE_DISK_PERCENT == "90"
+                and .RASPTELE_TEMPERATURE_CELSIUS == "80"
+          ' <<<"$rendered"
+      - name: Validate rendered Compose overrides
+        env:
+          TELEGRAM_BOT_TOKEN: ci-token
+          TELEGRAM_ALLOWED_USER_ID: "1"
+          PIHOLE_URL: http://pihole.test
+          PIHOLE_PASSWORD: ci-pihole-password
+          RASPTELE_RESTART_ALLOWED: pihole,jellyfin
+          RASPTELE_MONITOR_INTERVAL_SECONDS: "15"
+          RASPTELE_REMINDER_INTERVAL_MINUTES: "10"
+          RASPTELE_AUDIT_RETENTION_DAYS: "45"
+          RASPTELE_DISK_PERCENT: "85"
+          RASPTELE_TEMPERATURE_CELSIUS: "75"
+        run: |
+          rendered="$(docker compose config --format json)"
+          jq -e '
+            .services.rasptele.environment
+              | .PIHOLE_URL == "http://pihole.test"
+                and .PIHOLE_PASSWORD == "ci-pihole-password"
+                and .RASPTELE_RESTART_ALLOWED == "pihole,jellyfin"
+                and .RASPTELE_MONITOR_INTERVAL_SECONDS == "15"
+                and .RASPTELE_REMINDER_INTERVAL_MINUTES == "10"
+                and .RASPTELE_AUDIT_RETENTION_DAYS == "45"
+                and .RASPTELE_DISK_PERCENT == "85"
+                and .RASPTELE_TEMPERATURE_CELSIUS == "75"
+          ' <<<"$rendered"
+          jq -e '
+            .services["docker-guard"].environment.RASPTELE_RESTART_ALLOWED == "pihole,jellyfin"
+              and .services["rasptele-watchdog"].environment.RASPTELE_MONITOR_INTERVAL_SECONDS == "15"
+          ' <<<"$rendered"
+      - name: Reject missing required Compose variables
+        run: |
+          if env -u TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USER_ID=1 docker compose config --quiet; then
+            echo "Compose accepted missing TELEGRAM_BOT_TOKEN" >&2
+            exit 1
+          fi
+          if env -u TELEGRAM_ALLOWED_USER_ID TELEGRAM_BOT_TOKEN=ci-token docker compose config --quiet; then
+            echo "Compose accepted missing TELEGRAM_ALLOWED_USER_ID" >&2
+            exit 1
+          fi
 
   image:
     runs-on: ubuntu-latest

@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Consolidated Docker Compose, Portainer, and Coolify deployment into one pinned release manifest.
+- Replaced the required YAML configuration file with environment variables and safe defaults.
+- Stable container releases now also publish the optional `latest` tag.
+
+### Removed
+
+- Removed platform-specific Compose files and the YAML configuration interface.
+
 ## [0.2.0] - 2026-07-19
 
 ### Added

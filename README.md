@@ -32,20 +32,7 @@ qBittorrent, Jellyfin, Coolify API, and OpenWrt integrations are not implemented
 
 You need a 64-bit Raspberry Pi with Docker Engine and the Docker Compose plugin, a Telegram bot token from `@BotFather`, and your numeric Telegram user ID.
 
-```bash
-git clone https://github.com/maddhruv/rasptele.git
-cd rasptele
-cp .env.example .env
-chmod 600 .env
-cp config.example.yaml config.yaml
-```
-
-Add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_ID` to `.env`. Follow the [first deployment tutorial](docs/getting-started.md) to finish the configuration and verify the bot.
-
-```bash
-docker compose up -d --build
-docker compose ps
-```
+Open the [latest published release](https://github.com/maddhruv/rasptele/releases/latest) and follow the getting-started guide from that same tag. Do not deploy the mutable `main` branch: a release commit can arrive before its matching image finishes publishing.
 
 The stack starts `rasptele`, `docker-guard`, and `rasptele-watchdog`. It publishes no host ports.
 
@@ -53,9 +40,9 @@ The stack starts `rasptele`, `docker-guard`, and `rasptele-watchdog`. It publish
 
 | Method | Image source | Guide |
 | --- | --- | --- |
-| Docker Compose | Built from a local checkout | [Deploy from a local checkout](docs/deployment.md#deploy-from-a-local-checkout) |
-| Coolify | Built from the selected Git revision | [Deploy with Coolify](docs/deployment.md#deploy-with-coolify) |
-| Portainer | Pulled from GitHub Container Registry | [Deploy with Portainer](docs/deployment.md#deploy-with-portainer) |
+| Docker Compose | Released image from canonical Compose | [Deploy with Docker Compose](docs/deployment.md#deploy-with-docker-compose) |
+| Coolify | Same canonical Compose and released image | [Deploy with Coolify](docs/deployment.md#deploy-with-coolify) |
+| Portainer | Same canonical Compose and released image | [Deploy with Portainer](docs/deployment.md#deploy-with-portainer) |
 
 ## Documentation
 
@@ -64,7 +51,6 @@ The stack starts `rasptele`, `docker-guard`, and `rasptele-watchdog`. It publish
 - [Configure Rasptele](docs/configuration.md) — configuration reference
 - [Operate and troubleshoot Rasptele](docs/operations.md) — operational how-to guides
 - [Release Rasptele](docs/releasing.md) — maintainer release process
-- [Pi-hole v6 integration design](docs/plans/2026-07-18-pihole-v6-design.md) — implementation design
 
 ## Security
 

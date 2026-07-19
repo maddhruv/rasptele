@@ -47,7 +47,7 @@ npm run release -- 0.2.0
 Release-it then:
 
 - Moves `Unreleased` into a dated release section and updates comparison links.
-- Updates `package.json`, `package-lock.json`, `pyproject.toml`, `src/rasptele/__init__.py`, and all Compose image tags.
+- Updates `package.json`, `package-lock.json`, `pyproject.toml`, `src/rasptele/__init__.py`, and the canonical Compose image tags.
 - Creates and pushes a release commit and annotated `v0.2.0` tag.
 - Creates a draft GitHub Release using the exact changelog section as its notes.
 
@@ -57,12 +57,13 @@ The pushed tag starts the `Release` GitHub Actions workflow. The workflow runs t
 ghcr.io/maddhruv/rasptele:0.2.0
 ghcr.io/maddhruv/rasptele:0.2
 ghcr.io/maddhruv/rasptele:v0.2.0
+ghcr.io/maddhruv/rasptele:latest
 ```
 
 The workflow then publishes the prepared draft GitHub Release. If the workflow fails, the release remains a draft while the problem is corrected and the failed workflow is rerun.
 
 ## Verify the release
 
-Confirm that the workflow succeeded, the GitHub Release contains the expected changelog, and the GHCR package lists both `linux/arm64` and `linux/amd64` manifests. Deploy `compose.portainer.yaml` on a Raspberry Pi and verify that all three services remain running and `/status` responds in Telegram.
+Confirm that the workflow succeeded, the GitHub Release contains the expected changelog, and the GHCR package lists both `linux/arm64` and `linux/amd64` manifests. Deploy `compose.yaml` on a Raspberry Pi and verify that all three services remain running and `/status` responds in Telegram.
 
 Do not move or recreate a published version tag with different contents. Prepare a patch release if the tagged commit itself is wrong.

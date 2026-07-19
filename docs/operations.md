@@ -1,81 +1,45 @@
 # Operate and troubleshoot Rasptele
 
-Use these procedures to inspect a running stack, preserve its data, and diagnose common failures.
-
-## Inspect services and logs
-
-List the three services and follow their logs:
+## Inspect services and configuration
 
 ```bash
 docker compose ps
 docker compose logs -f rasptele
-docker compose logs -f docker-guard
-docker compose logs -f rasptele-watchdog
-```
-
-All services must remain running. A clean bot startup begins Telegram polling after configuration validation.
-
-## Validate configuration
-
-Confirm that the local files exist and render the Compose model:
-
-```bash
-test -f .env && test -f config.yaml && echo "configuration files found"
 docker compose config --quiet
 ```
 
-The second command exits without output when interpolation and Compose validation succeed. Application-level validation runs when each service starts.
+Compose validates interpolation; each process validates its environment at startup. Inspect `docker compose logs rasptele` for a variable-specific `configuration error`.
 
-## Back up audit and alert history
+## Back up data
 
-The `rasptele-data` volume contains the SQLite database. Stopping the stack makes the archive consistent but temporarily stops monitoring.
-
-Confirm the volume name before the backup if you changed the Compose project name:
-
-```bash
-docker volume ls
-```
-
-Stop the stack, archive the volume into the current directory, and restart it:
+The `rasptele-data` volume contains SQLite alerts, confirmations, and audit history. Stop the stack for a consistent archive:
 
 ```bash
 docker compose down
-docker run --rm \
-  -v rasptele_rasptele-data:/data \
-  -v "$PWD:/backup" \
+docker run --rm -v rasptele_rasptele-data:/data -v "$PWD:/backup" \
   alpine tar czf /backup/rasptele-data-backup.tgz -C /data .
 docker compose up -d
 ```
 
-Verify that `rasptele-data-backup.tgz` exists before moving or deleting the source volume.
+Confirm the actual volume name with `docker volume ls` if the Compose project name differs.
 
-## Test Pi-hole outage and recovery alerts
+## Test Pi-hole recovery alerts
 
-Use the documentation-only TEST-NET-1 address to test alerts without stopping DNS for the network.
+Temporarily set `PIHOLE_URL=http://192.0.2.1` with a non-empty `PIHOLE_PASSWORD`, then recreate only the bot:
 
-1. Back up the deployed `config.yaml`.
-2. Set `integrations.pihole.url` to `http://192.0.2.1`.
-3. Restart only `rasptele`:
+```bash
+docker compose up -d --force-recreate rasptele
+```
 
-   ```bash
-   docker compose restart rasptele
-   ```
+After one monitoring interval plus timeout, Telegram reports the outage. Restore the real URL and recreate `rasptele` again; the next check reports recovery.
 
-4. Wait for one monitoring interval plus the ten-second API timeout. Telegram reports `⚠️ Alert: Pi-hole service is unavailable`.
-5. Restore `config.yaml` and restart `rasptele` again.
-6. Wait for the next check. Telegram reports `✅ Recovered: Pi-hole service restored`.
-
-Restart the `rasptele` service from Coolify or Portainer when using either platform. Do not recreate the data volume or the other services.
-
-## Resolve common failures
+## Common failures
 
 | Symptom | Resolution |
 | --- | --- |
-| Bot does not reply | Verify the token and user ID, then inspect `docker compose logs rasptele`. The bot ignores every other user ID and non-private chat. |
-| `Docker guard is unavailable` | Confirm that `docker-guard` is running and has access to `/var/run/docker.sock`. Inspect its logs. |
-| `Pi-hole service is unavailable` | Confirm that the URL is reachable from the Docker host, the server runs Pi-hole v6, and `PIHOLE_PASSWORD` contains a current application password. |
-| `/pihole` says the integration is not configured | Add `integrations.pihole.url`, provide `PIHOLE_PASSWORD`, and restart `rasptele`. |
-| Temperature or throttling is unavailable | Confirm that the host is a supported Raspberry Pi Linux system and the read-only `/sys` mount remains present. |
-| A container has no restart button | Add its exact Docker name to `containers.restart_allowed`, then restart the services that read `config.yaml`. |
-
-See the [configuration reference](configuration.md) for defaults and validation constraints.
+| Bot does not reply | Verify Telegram variables and inspect bot logs. Only the configured user in a private chat is accepted. |
+| Docker guard unavailable | Confirm `docker-guard` is running and retains its Docker socket mount. |
+| Pi-hole unavailable | Verify `PIHOLE_URL`, application password, Pi-hole v6, and network reachability. |
+| `/pihole` not configured | Set both Pi-hole variables and recreate `rasptele`. |
+| No restart button | Add the exact name to `RASPTELE_RESTART_ALLOWED`, then recreate `rasptele` and `docker-guard`. |
+| Temperature unavailable | Confirm supported Raspberry Pi Linux host and unchanged `/sys` mount. |

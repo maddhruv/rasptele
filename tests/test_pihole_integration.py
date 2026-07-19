@@ -12,7 +12,7 @@ from rasptele.config import AlertConfig, Config, PiholeConfig
 from rasptele.main import main
 
 ROOT = Path(__file__).resolve().parents[1]
-COMPOSE_FILES = ("compose.yaml", "compose.coolify.yaml", "compose.portainer.yaml")
+COMPOSE_FILE = ROOT / "compose.yaml"
 
 
 def make_config(*, configured: bool) -> Config:
@@ -38,7 +38,7 @@ class ApplicationWiringTests(unittest.TestCase):
         monitor = MagicMock()
         pihole = MagicMock()
         with (
-            patch.object(sys, "argv", ["rasptele", "--config", "/tmp/config.yaml"]),
+            patch.object(sys, "argv", ["rasptele"]),
             patch("rasptele.main.load_config", return_value=config) as load_config,
             patch("rasptele.main.Store", return_value=store),
             patch("rasptele.main.Monitor", return_value=monitor) as monitor_type,
@@ -46,9 +46,7 @@ class ApplicationWiringTests(unittest.TestCase):
             patch("rasptele.main.run_bot", new_callable=AsyncMock) as run_bot,
         ):
             main()
-        load_config.assert_called_once_with(
-            "/tmp/config.yaml", require_integration_secrets=True
-        )
+        load_config.assert_called_once_with(load_pihole=True)
         store.close.assert_called_once_with()
         return store, monitor, pihole, monitor_type, pihole_type, run_bot
 
@@ -70,56 +68,113 @@ class ApplicationWiringTests(unittest.TestCase):
         monitor_type.assert_called_once_with(config, store, pihole=None)
         run_bot.assert_awaited_once_with(config, store, monitor, None)
 
+    def test_watchdog_loads_telegram_configuration_without_pihole(self) -> None:
+        config = make_config(configured=False)
+        with (
+            patch.object(sys, "argv", ["rasptele", "--watchdog"]),
+            patch("rasptele.main.load_config", return_value=config) as load_config,
+            patch("rasptele.main.run_watchdog", new_callable=AsyncMock) as run_watchdog,
+        ):
+            main()
+
+        load_config.assert_called_once_with(load_pihole=False)
+        run_watchdog.assert_awaited_once_with(config)
+
 
 class DeploymentManifestTests(unittest.TestCase):
-    def manifests(self):
-        for filename in COMPOSE_FILES:
-            with self.subTest(filename=filename):
-                yield filename, yaml.safe_load((ROOT / filename).read_text())
+    def setUp(self) -> None:
+        self.manifest = yaml.safe_load(COMPOSE_FILE.read_text())
+        self.services = self.manifest["services"]
 
-    def test_only_main_service_receives_pihole_password(self) -> None:
-        for _, manifest in self.manifests():
-            services = manifest["services"]
-            self.assertIn("PIHOLE_PASSWORD", services["rasptele"]["environment"])
-            self.assertEqual(
-                services["rasptele"]["environment"]["PIHOLE_PASSWORD"],
-                "${PIHOLE_PASSWORD:?required}",
-            )
-            self.assertNotIn(
-                "PIHOLE_PASSWORD", services["docker-guard"].get("environment", {})
-            )
-            self.assertNotIn(
-                "PIHOLE_PASSWORD", services["rasptele-watchdog"].get("environment", {})
-            )
+    def test_only_one_deployment_manifest_exists(self) -> None:
+        self.assertFalse((ROOT / "compose.coolify.yaml").exists())
+        self.assertFalse((ROOT / "compose.portainer.yaml").exists())
+        self.assertFalse((ROOT / "config.example.yaml").exists())
 
-    def test_service_secret_boundaries_are_least_privileged(self) -> None:
-        secret_names = {"TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USER_ID", "PIHOLE_PASSWORD"}
-        for _, manifest in self.manifests():
-            services = manifest["services"]
-            main_secrets = secret_names & set(services["rasptele"]["environment"])
-            guard_secrets = secret_names & set(
-                services["docker-guard"].get("environment", {})
-            )
-            watchdog_secrets = secret_names & set(
-                services["rasptele-watchdog"]["environment"]
-            )
-            self.assertEqual(main_secrets, secret_names)
-            self.assertEqual(guard_secrets, set())
-            self.assertEqual(
-                watchdog_secrets,
-                {"TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USER_ID"},
-            )
+    def test_services_pull_one_exact_release_without_config_mounts(self) -> None:
+        expected_image = f"ghcr.io/maddhruv/rasptele:{__version__}"
+        for name, service in self.services.items():
+            with self.subTest(service=name):
+                self.assertEqual(service["image"], expected_image)
+                self.assertEqual(service["pull_policy"], "always")
+                self.assertNotIn("build", service)
+                self.assertNotIn("--config", service.get("command", []))
+                self.assertFalse(
+                    any("/config" in volume for volume in service.get("volumes", []))
+                )
+
+    def test_service_environment_is_least_privileged(self) -> None:
+        self.assertEqual(
+            set(self.services["rasptele"]["environment"]),
+            {
+                "TELEGRAM_BOT_TOKEN",
+                "TELEGRAM_ALLOWED_USER_ID",
+                "PIHOLE_URL",
+                "PIHOLE_PASSWORD",
+                "RASPTELE_RESTART_ALLOWED",
+                "RASPTELE_MONITOR_INTERVAL_SECONDS",
+                "RASPTELE_REMINDER_INTERVAL_MINUTES",
+                "RASPTELE_AUDIT_RETENTION_DAYS",
+                "RASPTELE_DISK_PERCENT",
+                "RASPTELE_TEMPERATURE_CELSIUS",
+            },
+        )
+        self.assertEqual(
+            set(self.services["docker-guard"]["environment"]),
+            {"RASPTELE_RESTART_ALLOWED"},
+        )
+        self.assertEqual(
+            set(self.services["rasptele-watchdog"]["environment"]),
+            {
+                "TELEGRAM_BOT_TOKEN",
+                "TELEGRAM_ALLOWED_USER_ID",
+                "RASPTELE_MONITOR_INTERVAL_SECONDS",
+            },
+        )
+
+    def test_privileged_mounts_remain_isolated(self) -> None:
+        guard_volumes = self.services["docker-guard"]["volumes"]
+        bot_volumes = self.services["rasptele"]["volumes"]
+        self.assertIn("/var/run/docker.sock:/var/run/docker.sock", guard_volumes)
+        self.assertNotIn("/var/run/docker.sock:/var/run/docker.sock", bot_volumes)
+        self.assertEqual(self.services["rasptele"]["pid"], "host")
+        self.assertIn("rasptele-data:/data", bot_volumes)
+        self.assertIn("/proc:/host/proc:ro", bot_volumes)
+        self.assertIn("/sys:/host/sys:ro", bot_volumes)
+        self.assertIn("/:/host:ro", bot_volumes)
+        self.assertNotIn("volumes", self.services["rasptele-watchdog"])
 
     def test_release_versions_match(self) -> None:
         project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
         package = json.loads((ROOT / "package.json").read_text())
         self.assertEqual(project["version"], __version__)
         self.assertEqual(package["version"], __version__)
-        for _, manifest in self.manifests():
-            for service in manifest["services"].values():
-                self.assertEqual(
-                    service["image"], f"ghcr.io/maddhruv/rasptele:{__version__}"
-                )
+        for service in self.services.values():
+            self.assertEqual(service["image"], f"ghcr.io/maddhruv/rasptele:{__version__}")
+
+    def test_release_automation_targets_canonical_compose_and_latest(self) -> None:
+        release_it = json.loads((ROOT / ".release-it.json").read_text())
+        outputs = release_it["plugins"]["@release-it/bumper"]["out"]
+        compose_outputs = [
+            output["file"] for output in outputs if output["file"].endswith(".yaml")
+        ]
+        self.assertEqual(compose_outputs, ["compose.yaml"])
+        self.assertIn(
+            "docs/getting-started.md", [output["file"] for output in outputs]
+        )
+        self.assertIn("docs/deployment.md", [output["file"] for output in outputs])
+
+        deployment_docs = (ROOT / "docs/deployment.md").read_text()
+        self.assertIn("Releases from before the env-only migration", deployment_docs)
+        self.assertNotRegex(deployment_docs, r"v\d+\.\d+\.\d+ and earlier")
+        self.assertIn("git switch --detach <NEW_RELEASE_TAG>", deployment_docs)
+
+        release_workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertIn("type=raw,value=latest", release_workflow)
+        self.assertIn("group: release\n", release_workflow)
+        self.assertNotIn("group: release-${{ github.ref }}", release_workflow)
+        self.assertNotIn("compose.coolify.yaml", release_workflow)
+        self.assertNotIn("compose.portainer.yaml", release_workflow)
 
 
 if __name__ == "__main__":

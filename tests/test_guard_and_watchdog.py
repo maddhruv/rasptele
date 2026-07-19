@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from rasptele.config import AlertConfig, Config
 from rasptele.guard import GuardState, create_app
+from rasptele.guard import main as guard_main
 from rasptele.watchdog import Watchdog
 
 
@@ -25,6 +26,19 @@ def make_config() -> Config:
 
 
 class GuardTests(unittest.IsolatedAsyncioTestCase):
+    def test_guard_loads_only_restart_configuration(self):
+        config = make_config()
+        app = MagicMock()
+        with (
+            patch("rasptele.guard.load_config", return_value=config) as load_config,
+            patch("rasptele.guard.create_app", return_value=app),
+            patch("uvicorn.run") as run,
+        ):
+            guard_main()
+
+        load_config.assert_called_once_with(require_telegram=False, load_pihole=False)
+        run.assert_called_once_with(app, host="0.0.0.0", port=8080, log_level="info")
+
     def test_restart_allowlist_is_enforced_before_docker_lookup(self):
         state = GuardState.__new__(GuardState)
         state.config = make_config()

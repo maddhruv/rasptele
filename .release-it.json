@@ -35,11 +35,11 @@
           "type": "text/plain"
         },
         {
-          "file": "compose.coolify.yaml",
+          "file": "docs/getting-started.md",
           "type": "text/plain"
         },
         {
-          "file": "compose.portainer.yaml",
+          "file": "docs/deployment.md",
           "type": "text/plain"
         }
       ]

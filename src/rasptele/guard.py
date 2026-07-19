@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 from contextlib import asynccontextmanager
 
@@ -105,11 +104,8 @@ def create_app(config: Config) -> FastAPI:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the Rasptele Docker guard")
-    parser.add_argument("--config", default="/config/config.yaml")
-    args, _ = parser.parse_known_args()
     try:
-        config = load_config(args.config, require_telegram=False)
+        config = load_config(require_telegram=False, load_pihole=False)
     except ConfigurationError as exc:
         raise SystemExit(f"configuration error: {exc}") from exc
     import uvicorn

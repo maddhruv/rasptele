@@ -14,7 +14,7 @@ cd rasptele
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install --upgrade pip
-python3 -m pip install -e . ruff mypy
+python3 -m pip install -e '.[test]' ruff mypy
 ```
 
 Run the unit tests to verify the environment:
@@ -44,7 +44,7 @@ The main modules live in `src/rasptele/`:
 | Module | Responsibility |
 | --- | --- |
 | `bot.py` | Telegram commands, callback controls, and authorization checks |
-| `config.py` | Fail-closed YAML and environment validation |
+| `config.py` | Fail-closed environment validation |
 | `guard.py` | Narrow Docker socket boundary and allowlisted restart API |
 | `monitor.py` | Host, container, guard, and integration alert reconciliation |
 | `pihole.py` | Authenticated Pi-hole v6 client and response validation |
@@ -67,7 +67,7 @@ Discuss changes that broaden host authority or introduce a new integration in an
 Run the same static and unit checks as continuous integration (CI):
 
 ```bash
-ruff check src tests scripts
+ruff check src tests
 mypy --ignore-missing-imports src
 python3 -m unittest discover -s tests -v
 ```
@@ -78,23 +78,12 @@ Build the image when changing dependencies, packaging, startup behavior, or Dock
 docker build -t rasptele:local-test .
 ```
 
-Validate all Compose files when changing configuration or deployment:
+Validate Compose when changing configuration or deployment:
 
 ```bash
 TELEGRAM_BOT_TOKEN=test-token \
 TELEGRAM_ALLOWED_USER_ID=1 \
-PIHOLE_PASSWORD=test-password \
-docker compose -f compose.yaml config --quiet
-
-TELEGRAM_BOT_TOKEN=test-token \
-TELEGRAM_ALLOWED_USER_ID=1 \
-PIHOLE_PASSWORD=test-password \
-docker compose -f compose.coolify.yaml config --quiet
-
-TELEGRAM_BOT_TOKEN=test-token \
-TELEGRAM_ALLOWED_USER_ID=1 \
-PIHOLE_PASSWORD=test-password \
-docker compose -f compose.portainer.yaml config --quiet
+docker compose config --quiet
 ```
 
 The [CI workflow](.github/workflows/ci.yml) is the final source of truth. It also rejects version drift between the release metadata, Python package, and Compose images.

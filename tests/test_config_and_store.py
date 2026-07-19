@@ -9,157 +9,161 @@ from rasptele.store import Store
 
 
 class ConfigTests(unittest.TestCase):
+    telegram_environment = {
+        "TELEGRAM_BOT_TOKEN": "token",
+        "TELEGRAM_ALLOWED_USER_ID": "42",
+    }
+
     def test_missing_secret_fails_closed(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
-            path = Path(directory) / "config.yaml"
-            path.write_text("{}")
+        with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(ConfigurationError):
-                load_config(path)
+                load_config()
 
-    def test_loads_allowed_restart_names(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(
-            os.environ, {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_ALLOWED_USER_ID": "42"}, clear=True
-        ):
-            path = Path(directory) / "config.yaml"
-            path.write_text("containers:\n  restart_allowed: [jellyfin]\n")
-            config = load_config(path)
-            self.assertEqual(config.allowed_user_id, 42)
-            self.assertEqual(config.restart_allowed, frozenset({"jellyfin"}))
+        with patch.dict(os.environ, {"TELEGRAM_ALLOWED_USER_ID": "42"}, clear=True):
+            with self.assertRaisesRegex(ConfigurationError, "TELEGRAM_BOT_TOKEN"):
+                load_config()
 
-    def test_guard_config_does_not_receive_telegram_secret(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
-            path = Path(directory) / "config.yaml"
-            path.write_text("containers:\n  restart_allowed: [pihole]\n")
-            config = load_config(path, require_telegram=False)
-            self.assertEqual(config.allowed_user_id, 0)
-            self.assertEqual(config.restart_allowed, frozenset({"pihole"}))
+    def test_rejects_invalid_allowed_user_ids(self):
+        for value in ("", "invalid", "0", "-1"):
+            with self.subTest(value=value), patch.dict(
+                os.environ,
+                {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_ALLOWED_USER_ID": value},
+                clear=True,
+            ):
+                with self.assertRaisesRegex(ConfigurationError, "TELEGRAM_ALLOWED_USER_ID"):
+                    load_config()
 
-    def test_invalid_numeric_threshold_is_a_configuration_error(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(
-            os.environ, {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_ALLOWED_USER_ID": "42"}, clear=True
-        ):
-            path = Path(directory) / "config.yaml"
-            path.write_text("alerts:\n  disk_percent: invalid\n")
-            with self.assertRaisesRegex(ConfigurationError, "alerts.disk_percent must be a number"):
-                load_config(path)
+    def test_loads_defaults_without_optional_environment(self):
+        with patch.dict(os.environ, self.telegram_environment, clear=True):
+            config = load_config()
 
-    def test_invalid_section_interval_and_guard_url_are_rejected(self):
-        environment = {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_ALLOWED_USER_ID": "42"}
-        invalid_documents = [
-            "[]\n",
-            "alerts: []\n",
-            "containers: false\n",
-            "monitor_interval_seconds: 1.5\n",
-            "monitor_interval_seconds: true\n",
-            "docker_guard_url: http://\n",
-        ]
-        with tempfile.TemporaryDirectory() as directory, patch.dict(
-            os.environ, environment, clear=True
-        ):
-            path = Path(directory) / "config.yaml"
-            for document in invalid_documents:
-                with self.subTest(document=document):
-                    path.write_text(document)
-                    with self.assertRaises(ConfigurationError):
-                        load_config(path)
+        self.assertEqual(config.allowed_user_id, 42)
+        self.assertEqual(config.database_path, "/data/rasptele.sqlite3")
+        self.assertEqual(config.monitor_interval_seconds, 60)
+        self.assertEqual(config.reminder_interval_minutes, 30)
+        self.assertEqual(config.audit_retention_days, 90)
+        self.assertEqual(config.docker_guard_url, "http://docker-guard:8080")
+        self.assertEqual(config.restart_allowed, frozenset())
+        self.assertEqual(config.alerts.disk_percent, 90)
+        self.assertEqual(config.alerts.temperature_celsius, 80)
+        self.assertIsNone(config.pihole)
+
+    def test_loads_all_operational_overrides(self):
+        environment = {
+            **self.telegram_environment,
+            "RASPTELE_MONITOR_INTERVAL_SECONDS": "15",
+            "RASPTELE_REMINDER_INTERVAL_MINUTES": "10",
+            "RASPTELE_AUDIT_RETENTION_DAYS": "45",
+            "RASPTELE_DISK_PERCENT": "85.5",
+            "RASPTELE_TEMPERATURE_CELSIUS": "75.25",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            config = load_config()
+
+        self.assertEqual(config.monitor_interval_seconds, 15)
+        self.assertEqual(config.reminder_interval_minutes, 10)
+        self.assertEqual(config.audit_retention_days, 45)
+        self.assertEqual(config.alerts.disk_percent, 85.5)
+        self.assertEqual(config.alerts.temperature_celsius, 75.25)
+
+    def test_restart_allowlist_is_comma_separated_trimmed_and_deduplicated(self):
+        environment = {
+            **self.telegram_environment,
+            "RASPTELE_RESTART_ALLOWED": " pihole, jellyfin,,pihole,  ",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            config = load_config()
+
+        self.assertEqual(config.restart_allowed, frozenset({"pihole", "jellyfin"}))
+
+    def test_guard_loads_only_restart_configuration(self):
+        environment = {
+            "RASPTELE_RESTART_ALLOWED": "pihole",
+            "PIHOLE_URL": "invalid",
+            "PIHOLE_PASSWORD": "unused-secret",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            config = load_config(require_telegram=False, load_pihole=False)
+
+        self.assertEqual(config.allowed_user_id, 0)
+        self.assertEqual(config.restart_allowed, frozenset({"pihole"}))
+        self.assertIsNone(config.pihole)
+
+    def test_watchdog_ignores_pihole_configuration(self):
+        environment = {**self.telegram_environment, "PIHOLE_PASSWORD": "unused-secret"}
+        with patch.dict(os.environ, environment, clear=True):
+            config = load_config(load_pihole=False)
+
+        self.assertEqual(config.allowed_user_id, 42)
+        self.assertIsNone(config.pihole)
+
+    def test_invalid_numeric_environment_is_rejected(self):
+        invalid_values = {
+            "RASPTELE_MONITOR_INTERVAL_SECONDS": ("0", "1.5", "invalid"),
+            "RASPTELE_REMINDER_INTERVAL_MINUTES": ("0", "invalid"),
+            "RASPTELE_AUDIT_RETENTION_DAYS": ("-1", "invalid"),
+            "RASPTELE_DISK_PERCENT": ("0", "100.1", "nan", "inf", "invalid"),
+            "RASPTELE_TEMPERATURE_CELSIUS": ("0", "nan", "inf", "invalid"),
+        }
+        for name, values in invalid_values.items():
+            for value in values:
+                with self.subTest(name=name, value=value), patch.dict(
+                    os.environ, {**self.telegram_environment, name: value}, clear=True
+                ):
+                    with self.assertRaisesRegex(ConfigurationError, name):
+                        load_config()
 
     def test_pihole_integration_is_optional(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(
-            os.environ,
-            {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_ALLOWED_USER_ID": "42"},
-            clear=True,
-        ):
-            path = Path(directory) / "config.yaml"
-            path.write_text("{}")
-            self.assertIsNone(load_config(path).pihole)
+        environment = {**self.telegram_environment, "PIHOLE_URL": "", "PIHOLE_PASSWORD": ""}
+        with patch.dict(os.environ, environment, clear=True):
+            self.assertIsNone(load_config().pihole)
 
     def test_loads_normalized_pihole_configuration(self):
         environment = {
-            "TELEGRAM_BOT_TOKEN": "token",
-            "TELEGRAM_ALLOWED_USER_ID": "42",
+            **self.telegram_environment,
+            "PIHOLE_URL": "https://pi.hole/",
             "PIHOLE_PASSWORD": "application-password",
         }
-        with tempfile.TemporaryDirectory() as directory, patch.dict(
-            os.environ, environment, clear=True
-        ):
-            path = Path(directory) / "config.yaml"
-            path.write_text("integrations:\n  pihole:\n    url: https://pi.hole/\n")
-            pihole = load_config(path).pihole
-            self.assertIsNotNone(pihole)
-            self.assertEqual(pihole.url, "https://pi.hole")
-            self.assertEqual(pihole.password, "application-password")
+        with patch.dict(os.environ, environment, clear=True):
+            pihole = load_config().pihole
 
-    def test_configured_pihole_requires_password_for_main_bot(self):
-        environment = {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_ALLOWED_USER_ID": "42"}
-        with tempfile.TemporaryDirectory() as directory, patch.dict(
-            os.environ, environment, clear=True
-        ):
-            path = Path(directory) / "config.yaml"
-            path.write_text("integrations:\n  pihole:\n    url: http://192.168.1.2\n")
-            with self.assertRaisesRegex(ConfigurationError, "PIHOLE_PASSWORD is required"):
-                load_config(path)
+        self.assertIsNotNone(pihole)
+        self.assertEqual(pihole.url, "https://pi.hole")
+        self.assertEqual(pihole.password, "application-password")
 
-    def test_non_bot_process_can_load_pihole_url_without_password(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
-            path = Path(directory) / "config.yaml"
-            path.write_text("integrations:\n  pihole:\n    url: http://192.168.1.2/\n")
-            pihole = load_config(
-                path, require_telegram=False, require_integration_secrets=False
-            ).pihole
-            self.assertIsNotNone(pihole)
-            self.assertEqual(pihole.url, "http://192.168.1.2")
-            self.assertEqual(pihole.password, "")
+    def test_pihole_url_and_password_must_be_set_together(self):
+        partial_environments = (
+            {"PIHOLE_URL": "http://192.168.1.2"},
+            {"PIHOLE_PASSWORD": "application-password"},
+        )
+        for partial in partial_environments:
+            with self.subTest(partial=partial), patch.dict(
+                os.environ, {**self.telegram_environment, **partial}, clear=True
+            ):
+                with self.assertRaisesRegex(ConfigurationError, "PIHOLE_URL and PIHOLE_PASSWORD"):
+                    load_config()
 
-    def test_watchdog_config_requires_telegram_but_not_pihole_secret(self):
-        environment = {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_ALLOWED_USER_ID": "42"}
-        with tempfile.TemporaryDirectory() as directory, patch.dict(
-            os.environ, environment, clear=True
-        ):
-            path = Path(directory) / "config.yaml"
-            path.write_text("integrations:\n  pihole:\n    url: http://192.168.1.2\n")
-            config = load_config(path, require_integration_secrets=False)
-            self.assertEqual(config.allowed_user_id, 42)
-            self.assertIsNotNone(config.pihole)
-            self.assertEqual(config.pihole.password, "")
-
-    def test_invalid_pihole_configuration_is_rejected(self):
-        environment = {
-            "TELEGRAM_BOT_TOKEN": "token",
-            "TELEGRAM_ALLOWED_USER_ID": "42",
-            "PIHOLE_PASSWORD": "application-password",
-        }
-        invalid_documents = [
-            "integrations: []\n",
-            "integrations:\n  pihole: []\n",
-            "integrations:\n  pihole: {}\n",
-            "integrations:\n  pihole:\n    url: ''\n",
-            "integrations:\n  pihole:\n    url: pi.hole\n",
-            "integrations:\n  pihole:\n    url: http://\n",
-        ]
-        with tempfile.TemporaryDirectory() as directory, patch.dict(
-            os.environ, environment, clear=True
-        ):
-            path = Path(directory) / "config.yaml"
-            for document in invalid_documents:
-                with self.subTest(document=document):
-                    path.write_text(document)
-                    with self.assertRaises(ConfigurationError):
-                        load_config(path)
+    def test_invalid_pihole_url_is_rejected(self):
+        for url in ("pi.hole", "http://"):
+            environment = {
+                **self.telegram_environment,
+                "PIHOLE_URL": url,
+                "PIHOLE_PASSWORD": "application-password",
+            }
+            with self.subTest(url=url), patch.dict(os.environ, environment, clear=True):
+                with self.assertRaisesRegex(ConfigurationError, "PIHOLE_URL"):
+                    load_config()
 
     def test_pihole_configuration_error_does_not_include_password(self):
         password = "do-not-leak-this-password"
         environment = {
-            "TELEGRAM_BOT_TOKEN": "token",
-            "TELEGRAM_ALLOWED_USER_ID": "42",
+            **self.telegram_environment,
+            "PIHOLE_URL": "invalid",
             "PIHOLE_PASSWORD": password,
         }
-        with tempfile.TemporaryDirectory() as directory, patch.dict(
-            os.environ, environment, clear=True
-        ):
-            path = Path(directory) / "config.yaml"
-            path.write_text("integrations:\n  pihole:\n    url: invalid\n")
+        with patch.dict(os.environ, environment, clear=True):
             with self.assertRaises(ConfigurationError) as raised:
-                load_config(path)
+                load_config()
             self.assertNotIn(password, str(raised.exception))
 
     def test_pihole_password_is_hidden_from_config_representation(self):

@@ -5,11 +5,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from math import isfinite
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
-
-import yaml
 
 
 class ConfigurationError(ValueError):
@@ -76,17 +73,19 @@ def _http_url(value: Any, name: str) -> str:
     return value.rstrip("/")
 
 
-def load_config(
-    path: str | Path,
-    *,
-    require_telegram: bool = True,
-    require_integration_secrets: bool | None = None,
-) -> Config:
-    """Load YAML settings and, for the bot, required environment secrets."""
-    if require_integration_secrets is None:
-        require_integration_secrets = require_telegram
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    user_id = os.environ.get("TELEGRAM_ALLOWED_USER_ID", "").strip()
+def _environment(name: str, default: str = "") -> str:
+    return os.environ.get(name, default).strip()
+
+
+def _restart_allowlist() -> frozenset[str]:
+    names = _environment("RASPTELE_RESTART_ALLOWED").split(",")
+    return frozenset(name.strip() for name in names if name.strip())
+
+
+def load_config(*, require_telegram: bool = True, load_pihole: bool = True) -> Config:
+    """Load and validate configuration from the process environment."""
+    token = _environment("TELEGRAM_BOT_TOKEN")
+    user_id = _environment("TELEGRAM_ALLOWED_USER_ID")
     if require_telegram and not token:
         raise ConfigurationError("TELEGRAM_BOT_TOKEN is required")
     if require_telegram and not user_id:
@@ -100,61 +99,45 @@ def load_config(
         if allowed_user_id <= 0:
             raise ConfigurationError("TELEGRAM_ALLOWED_USER_ID must be positive")
 
-    config_path = Path(path)
-    try:
-        loaded = yaml.safe_load(config_path.read_text())
-    except OSError as exc:
-        raise ConfigurationError(f"cannot read config: {config_path}") from exc
-    except yaml.YAMLError as exc:
-        raise ConfigurationError("config is not valid YAML") from exc
-    raw = {} if loaded is None else loaded
-    if not isinstance(raw, dict):
-        raise ConfigurationError("config root must be a mapping")
-
-    alerts = raw.get("alerts", {})
-    containers = raw.get("containers", {})
-    integrations = raw.get("integrations", {})
-    if not isinstance(alerts, dict) or not isinstance(containers, dict):
-        raise ConfigurationError("alerts and containers must be mappings")
-    if not isinstance(integrations, dict):
-        raise ConfigurationError("integrations must be a mapping")
-    names = containers.get("restart_allowed", [])
-    if not isinstance(names, list) or not all(
-        isinstance(item, str) and item and item.strip() == item for item in names
-    ):
-        raise ConfigurationError("containers.restart_allowed must be a list of names")
-
-    disk = _positive_float(alerts.get("disk_percent", 90), "alerts.disk_percent", maximum=100)
-    temp = _positive_float(alerts.get("temperature_celsius", 80), "alerts.temperature_celsius")
-    database_path = raw.get("database_path", "/data/rasptele.sqlite3")
-    docker_guard_url = _http_url(
-        raw.get("docker_guard_url", "http://docker-guard:8080"), "docker_guard_url"
-    )
-    if not isinstance(database_path, str) or not database_path.strip():
-        raise ConfigurationError("database_path must be a non-empty string")
-
     pihole: PiholeConfig | None = None
-    if "pihole" in integrations:
-        pihole_raw = integrations["pihole"]
-        if not isinstance(pihole_raw, dict):
-            raise ConfigurationError("integrations.pihole must be a mapping")
-        pihole_url = _http_url(pihole_raw.get("url"), "integrations.pihole.url")
-        pihole_password = os.environ.get("PIHOLE_PASSWORD", "").strip()
-        if require_integration_secrets and not pihole_password:
-            raise ConfigurationError("PIHOLE_PASSWORD is required when Pi-hole is configured")
-        pihole = PiholeConfig(url=pihole_url, password=pihole_password)
+    if load_pihole:
+        pihole_url = _environment("PIHOLE_URL")
+        pihole_password = _environment("PIHOLE_PASSWORD")
+        if bool(pihole_url) != bool(pihole_password):
+            raise ConfigurationError("PIHOLE_URL and PIHOLE_PASSWORD must be set together")
+        if pihole_url:
+            pihole = PiholeConfig(
+                url=_http_url(pihole_url, "PIHOLE_URL"), password=pihole_password
+            )
 
     return Config(
         token=token,
         allowed_user_id=allowed_user_id,
-        database_path=database_path.strip(),
-        monitor_interval_seconds=_positive_int(raw.get("monitor_interval_seconds", 60), "monitor interval"),
-        reminder_interval_minutes=_positive_int(
-            raw.get("reminder_interval_minutes", 30), "reminder interval"
+        database_path="/data/rasptele.sqlite3",
+        monitor_interval_seconds=_positive_int(
+            _environment("RASPTELE_MONITOR_INTERVAL_SECONDS", "60"),
+            "RASPTELE_MONITOR_INTERVAL_SECONDS",
         ),
-        audit_retention_days=_positive_int(raw.get("audit_retention_days", 90), "audit retention"),
-        docker_guard_url=docker_guard_url,
-        restart_allowed=frozenset(names),
-        alerts=AlertConfig(disk_percent=disk, temperature_celsius=temp),
+        reminder_interval_minutes=_positive_int(
+            _environment("RASPTELE_REMINDER_INTERVAL_MINUTES", "30"),
+            "RASPTELE_REMINDER_INTERVAL_MINUTES",
+        ),
+        audit_retention_days=_positive_int(
+            _environment("RASPTELE_AUDIT_RETENTION_DAYS", "90"),
+            "RASPTELE_AUDIT_RETENTION_DAYS",
+        ),
+        docker_guard_url="http://docker-guard:8080",
+        restart_allowed=_restart_allowlist(),
+        alerts=AlertConfig(
+            disk_percent=_positive_float(
+                _environment("RASPTELE_DISK_PERCENT", "90"),
+                "RASPTELE_DISK_PERCENT",
+                maximum=100,
+            ),
+            temperature_celsius=_positive_float(
+                _environment("RASPTELE_TEMPERATURE_CELSIUS", "80"),
+                "RASPTELE_TEMPERATURE_CELSIUS",
+            ),
+        ),
         pihole=pihole,
     )

@@ -17,7 +17,6 @@ from .watchdog import run_watchdog
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Rasptele Telegram control plane")
-    parser.add_argument("--config", default="/config/config.yaml")
     parser.add_argument("--guard", action="store_true", help="run the Docker guard sidecar")
     parser.add_argument("--watchdog", action="store_true", help="run the independent failure notifier")
     args, _ = parser.parse_known_args()
@@ -26,7 +25,7 @@ def main() -> None:
         return
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
-        config = load_config(args.config, require_integration_secrets=not args.watchdog)
+        config = load_config(load_pihole=not args.watchdog)
     except ConfigurationError as exc:
         raise SystemExit(f"configuration error: {exc}") from exc
     if args.watchdog:
