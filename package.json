@@ -1,0 +1,18 @@
+{
+  "name": "rasptele-release",
+  "version": "0.1.1",
+  "private": true,
+  "description": "Release automation for Rasptele",
+  "scripts": {
+    "release": "release-it",
+    "release:dry-run": "release-it --dry-run"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "devDependencies": {
+    "@release-it/bumper": "7.0.6",
+    "@release-it/keep-a-changelog": "7.1.0",
+    "release-it": "20.2.1"
+  }
+}

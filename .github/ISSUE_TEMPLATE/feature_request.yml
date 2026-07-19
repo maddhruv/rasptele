@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose a focused improvement to Rasptele.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the user problem first. Changes that broaden Docker or host authority require explicit security analysis.
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: What task is difficult or impossible today, and who encounters it?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the observable result without assuming a specific implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: Include commands, configuration, or interface ideas when useful.
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and deployment impact
+      description: Explain new credentials, permissions, network access, host mounts, or Docker capabilities. Write "None" when there is no impact.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe current workarounds or narrower solutions.

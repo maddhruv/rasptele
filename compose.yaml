@@ -1,10 +1,11 @@
 services:
   rasptele:
     build: .
-    image: ghcr.io/maddhruv/rasptele:0.1.0
-    env_file:
-      - path: .env
-        required: false
+    image: ghcr.io/maddhruv/rasptele:0.1.1
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?required}
+      TELEGRAM_ALLOWED_USER_ID: ${TELEGRAM_ALLOWED_USER_ID:?required}
+      PIHOLE_PASSWORD: ${PIHOLE_PASSWORD:?required}
     command: ["--config", "/config/config.yaml"]
     depends_on:
       docker-guard:
@@ -20,7 +21,7 @@ services:
 
   docker-guard:
     build: .
-    image: ghcr.io/maddhruv/rasptele:0.1.0
+    image: ghcr.io/maddhruv/rasptele:0.1.1
     command: ["--guard", "--config", "/config/config.yaml"]
     volumes:
       - ./config.yaml:/config/config.yaml:ro
@@ -29,10 +30,10 @@ services:
 
   rasptele-watchdog:
     build: .
-    image: ghcr.io/maddhruv/rasptele:0.1.0
-    env_file:
-      - path: .env
-        required: false
+    image: ghcr.io/maddhruv/rasptele:0.1.1
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?required}
+      TELEGRAM_ALLOWED_USER_ID: ${TELEGRAM_ALLOWED_USER_ID:?required}
     command: ["--watchdog", "--config", "/config/config.yaml"]
     depends_on:
       docker-guard:

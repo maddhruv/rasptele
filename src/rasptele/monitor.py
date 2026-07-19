@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
@@ -11,7 +12,16 @@ import httpx
 import psutil
 
 from .config import Config
+from .pihole import PiholeAuthenticationError, PiholeClient, PiholeError
 from .store import Store
+
+_PIHOLE_MESSAGES = {
+    "opened": "⚠️ Alert: Pi-hole service is unavailable",
+    "reminder": "🔁 Alert persists: Pi-hole service is unavailable",
+    "recovered": "✅ Recovered: Pi-hole service restored",
+}
+_PIHOLE_UNAVAILABLE = "Pi-hole service is unavailable"
+_NOTIFIABLE_TRANSITIONS = {"opened", "reminder"}
 
 
 @dataclass(frozen=True)
@@ -67,9 +77,12 @@ def host_stats() -> HostStats:
 
 
 class Monitor:
-    def __init__(self, config: Config, store: Store) -> None:
+    def __init__(
+        self, config: Config, store: Store, *, pihole: PiholeClient | None = None
+    ) -> None:
         self.config = config
         self.store = store
+        self.pihole = pihole
         self.client = httpx.AsyncClient(base_url=config.docker_guard_url, timeout=10)
         self._delivery_lock = asyncio.Lock()
 
@@ -85,18 +98,43 @@ class Monitor:
         response = await self.client.post("/v1/restart", json={"name": name})
         response.raise_for_status()
 
-    def _reconcile(self, key: str, active: bool, detail: str) -> None:
-        messages = {
+    def _reconcile(
+        self,
+        key: str,
+        active: bool,
+        detail: str,
+        messages: dict[str, str] | None = None,
+    ) -> str | None:
+        notification_messages = messages or {
             transition: self._format(transition, detail)
             for transition in ("opened", "reminder", "recovered")
         }
-        self.store.reconcile_incident(
+        return self.store.reconcile_incident(
             key,
             active,
             detail,
             self.config.reminder_interval_minutes * 60,
-            messages,
+            notification_messages,
         )
+
+    async def _check_pihole(self) -> None:
+        if self.pihole is None:
+            return
+        try:
+            await self.pihole.status()
+        except PiholeError as exc:
+            transition = self._reconcile(
+                "pihole", True, _PIHOLE_UNAVAILABLE, _PIHOLE_MESSAGES
+            )
+            if transition in _NOTIFIABLE_TRANSITIONS:
+                if isinstance(exc, PiholeAuthenticationError):
+                    self.store.audit("pihole_auth_failed", "Pi-hole authentication failed")
+                else:
+                    self.store.audit("pihole_check_failed", "Pi-hole status check failed")
+        else:
+            self._reconcile(
+                "pihole", False, "Pi-hole service restored", _PIHOLE_MESSAGES
+            )
 
     async def check(self) -> None:
         stats = host_stats()
@@ -125,21 +163,22 @@ class Monitor:
                 raise ValueError("Docker guard returned malformed container data")
         except (httpx.HTTPError, ValueError, TypeError, KeyError):
             self._reconcile("docker_guard", True, "Docker guard is unavailable")
-            return
-        self._reconcile("docker_guard", False, "Docker monitoring restored")
-        present: set[str] = set()
-        for container in containers:
-            name = str(container["name"])
-            key = f"container:{name}"
-            present.add(key)
-            status = str(container.get("status") or "unknown")
-            health = container.get("health")
-            active = status != "running" or health == "unhealthy"
-            detail = f"Container {name} is {status}" + (f" ({health})" if health else "")
-            self._reconcile(key, active, detail)
-        for key in self.store.active_incident_keys("container:") - present:
-            name = key.split(":", 1)[1]
-            self._reconcile(key, False, f"Container {name} was removed")
+        else:
+            self._reconcile("docker_guard", False, "Docker monitoring restored")
+            present: set[str] = set()
+            for container in containers:
+                name = str(container["name"])
+                key = f"container:{name}"
+                present.add(key)
+                status = str(container.get("status") or "unknown")
+                health = container.get("health")
+                active = status != "running" or health == "unhealthy"
+                detail = f"Container {name} is {status}" + (f" ({health})" if health else "")
+                self._reconcile(key, active, detail)
+            for key in self.store.active_incident_keys("container:") - present:
+                name = key.split(":", 1)[1]
+                self._reconcile(key, False, f"Container {name} was removed")
+        await self._check_pihole()
 
     async def _deliver_pending(self, notify) -> None:  # type: ignore[no-untyped-def]
         async with self._delivery_lock:
@@ -172,6 +211,8 @@ class Monitor:
                 await asyncio.sleep(self.config.monitor_interval_seconds)
         finally:
             events.cancel()
+            with suppress(asyncio.CancelledError):
+                await events
 
     async def _watch_events(self, notify) -> None:  # type: ignore[no-untyped-def]
         """Reconcile promptly after sanitized Docker lifecycle events."""

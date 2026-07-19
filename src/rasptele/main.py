@@ -10,6 +10,7 @@ from .bot import run_bot
 from .config import ConfigurationError, load_config
 from .guard import main as guard_main
 from .monitor import Monitor
+from .pihole import PiholeClient
 from .store import Store
 from .watchdog import run_watchdog
 
@@ -25,16 +26,17 @@ def main() -> None:
         return
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
-        config = load_config(args.config)
+        config = load_config(args.config, require_integration_secrets=not args.watchdog)
     except ConfigurationError as exc:
         raise SystemExit(f"configuration error: {exc}") from exc
     if args.watchdog:
         asyncio.run(run_watchdog(config))
         return
     store = Store(config.database_path)
-    monitor = Monitor(config, store)
+    pihole = PiholeClient(config.pihole) if config.pihole is not None else None
+    monitor = Monitor(config, store, pihole=pihole)
     try:
-        asyncio.run(run_bot(config, store, monitor))
+        asyncio.run(run_bot(config, store, monitor, pihole))
     finally:
         store.close()
 

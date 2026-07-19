@@ -10,4 +10,7 @@ containers:
   restart_allowed:
     - pihole
 docker_guard_url: http://docker-guard:8080
-integrations: {}
+integrations:
+  pihole:
+    # Stable Pi-hole v6 LAN URL, reachable from this Docker host.
+    url: http://192.168.1.2

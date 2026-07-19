@@ -1,0 +1,53 @@
+name: Support question
+description: Ask for help with configuration, deployment, or operation.
+title: "[Support]: "
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read SUPPORT.md and search existing issues first. Remove all tokens, passwords, session IDs, user IDs, and other secrets.
+  - type: input
+    id: version
+    attributes:
+      label: Rasptele version
+      description: Provide a release tag or commit hash.
+      placeholder: v0.1.1
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment method
+      options:
+        - Docker Compose from a local checkout
+        - Coolify
+        - Portainer
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+      description: Describe the intended outcome and where you are blocked.
+    validations:
+      required: true
+  - type: textarea
+    id: attempts
+    attributes:
+      label: What have you tried?
+      description: Include relevant commands, exact errors, and sanitized logs or configuration.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched the documentation and existing issues.
+          required: true
+        - label: I removed secrets and personal data from this request.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

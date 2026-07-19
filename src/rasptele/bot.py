@@ -14,6 +14,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from .config import Config
 from .monitor import Monitor, host_stats
+from .pihole import PiholeClient, PiholeError, PiholeStatus, PiholeStatusRefreshError
 from .store import Store
 
 
@@ -40,7 +41,46 @@ def _container_keyboard(containers: list[dict[str, object]]) -> InlineKeyboardMa
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def create_dispatcher(config: Config, store: Store, monitor: Monitor) -> Dispatcher:
+def _pihole_view(status: PiholeStatus) -> tuple[str, InlineKeyboardMarkup]:
+    text = (
+        "🕳 <b>Pi-hole</b>\n"
+        f"Blocking: {escape(status.blocking)}\n"
+        f"Queries: {status.queries_total:,}\n"
+        f"Blocked: {status.queries_blocked:,} ({status.percent_blocked:.1f}%)\n"
+        f"Blocklist domains: {status.domains_being_blocked:,}\n"
+        f"Active clients: {status.active_clients:,}"
+    )
+    rows: list[list[InlineKeyboardButton]] = []
+    if status.blocking == "enabled":
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="Disable for 5 minutes", callback_data="pihole-disable-request"
+                )
+            ]
+        )
+    elif status.blocking == "disabled":
+        if status.timer_seconds is not None:
+            text += f"\nTimer: {status.timer_seconds:g} seconds"
+        rows.append([InlineKeyboardButton(text="Enable now", callback_data="pihole-enable")])
+    rows.append([InlineKeyboardButton(text="Refresh", callback_data="pihole-refresh")])
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _pihole_refresh_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Refresh", callback_data="pihole-refresh")]
+        ]
+    )
+
+
+def create_dispatcher(
+    config: Config,
+    store: Store,
+    monitor: Monitor,
+    pihole: PiholeClient | None = None,
+) -> Dispatcher:
     router = Router()
 
     async def deny_if_needed(event: Message | CallbackQuery) -> bool:
@@ -54,7 +94,10 @@ def create_dispatcher(config: Config, store: Store, monitor: Monitor) -> Dispatc
     async def help_command(message: Message) -> None:
         if await deny_if_needed(message):
             return
-        await message.answer("Rasptele is online. Use /status, /containers, or /audit.")
+        commands = "/status, /containers, /audit"
+        if pihole is not None:
+            commands += ", or /pihole"
+        await message.answer(f"Rasptele is online. Use {commands}.")
 
     @router.message(Command("status"))
     async def status(message: Message) -> None:
@@ -104,6 +147,40 @@ def create_dispatcher(config: Config, store: Store, monitor: Monitor) -> Dispatc
     async def containers_command(message: Message) -> None:
         await show_containers(message)
 
+    async def show_pihole(event: Message | CallbackQuery) -> None:
+        if await deny_if_needed(event):
+            return
+        if pihole is None:
+            if isinstance(event, CallbackQuery):
+                await event.answer("Pi-hole integration is not configured.", show_alert=True)
+            else:
+                await event.answer("Pi-hole integration is not configured.")
+            return
+        try:
+            status = await pihole.status()
+        except PiholeError as exc:
+            store.audit("pihole_status_failed", f"reason_type={type(exc).__name__}")
+            text = "Pi-hole is unavailable. Try again later."
+            keyboard = _pihole_refresh_keyboard()
+            if isinstance(event, CallbackQuery):
+                assert isinstance(event.message, Message)
+                await event.message.edit_text(text, reply_markup=keyboard)
+                await event.answer()
+            else:
+                await event.answer(text, reply_markup=keyboard)
+            return
+        text, keyboard = _pihole_view(status)
+        if isinstance(event, CallbackQuery):
+            assert isinstance(event.message, Message)
+            await event.message.edit_text(text, reply_markup=keyboard)
+            await event.answer()
+        else:
+            await event.answer(text, reply_markup=keyboard)
+
+    @router.message(Command("pihole"))
+    async def pihole_command(message: Message) -> None:
+        await show_pihole(message)
+
     @router.message(Command("audit"))
     async def audit(message: Message) -> None:
         if await deny_if_needed(message):
@@ -123,6 +200,95 @@ def create_dispatcher(config: Config, store: Store, monitor: Monitor) -> Dispatc
     @router.callback_query(F.data == "containers")
     async def refresh_containers(query: CallbackQuery) -> None:
         await show_containers(query)
+
+    @router.callback_query(F.data == "pihole-refresh")
+    async def refresh_pihole(query: CallbackQuery) -> None:
+        await show_pihole(query)
+
+    @router.callback_query(F.data == "pihole-disable-request")
+    async def pihole_disable_request(query: CallbackQuery) -> None:
+        if await deny_if_needed(query):
+            return
+        if pihole is None:
+            await query.answer("Pi-hole integration is not configured.", show_alert=True)
+            return
+        assert isinstance(query.message, Message)
+        token = store.create_confirmation(config.allowed_user_id, "pihole_disable", "300")
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Confirm disable",
+                        callback_data=f"pihole-disable-confirm:{token}",
+                    )
+                ],
+                [InlineKeyboardButton(text="Cancel", callback_data="pihole-refresh")],
+            ]
+        )
+        await query.message.edit_text(
+            "⚠️ Disable Pi-hole blocking for 5 minutes? This action expires in 60 seconds.",
+            reply_markup=keyboard,
+        )
+        await query.answer()
+
+    @router.callback_query(F.data.startswith("pihole-disable-confirm:"))
+    async def pihole_disable_confirm(query: CallbackQuery) -> None:
+        if await deny_if_needed(query):
+            return
+        if pihole is None:
+            await query.answer("Pi-hole integration is not configured.", show_alert=True)
+            return
+        assert isinstance(query.message, Message)
+        token = (query.data or "").split(":", 1)[1]
+        seconds = store.consume_confirmation_target(
+            token, config.allowed_user_id, "pihole_disable"
+        )
+        if seconds != "300":
+            await query.answer("Confirmation expired or already used", show_alert=True)
+            return
+        try:
+            status = await pihole.disable(300)
+        except PiholeStatusRefreshError as exc:
+            store.audit("pihole_disabled", "seconds=300")
+            store.audit(
+                "pihole_disable_status_failed", f"reason_type={exc.reason_type}"
+            )
+            await query.message.edit_text(
+                "Pi-hole was updated, but its current status could not be refreshed."
+            )
+        except PiholeError as exc:
+            store.audit("pihole_disable_failed", f"reason_type={type(exc).__name__}")
+            await query.message.edit_text("Pi-hole is unavailable. Try again later.")
+        else:
+            store.audit("pihole_disabled", "seconds=300")
+            text, keyboard = _pihole_view(status)
+            await query.message.edit_text(text, reply_markup=keyboard)
+        await query.answer()
+
+    @router.callback_query(F.data == "pihole-enable")
+    async def pihole_enable(query: CallbackQuery) -> None:
+        if await deny_if_needed(query):
+            return
+        if pihole is None:
+            await query.answer("Pi-hole integration is not configured.", show_alert=True)
+            return
+        assert isinstance(query.message, Message)
+        try:
+            status = await pihole.enable()
+        except PiholeStatusRefreshError as exc:
+            store.audit("pihole_enabled", "")
+            store.audit("pihole_enable_status_failed", f"reason_type={exc.reason_type}")
+            await query.message.edit_text(
+                "Pi-hole was updated, but its current status could not be refreshed."
+            )
+        except PiholeError as exc:
+            store.audit("pihole_enable_failed", f"reason_type={type(exc).__name__}")
+            await query.message.edit_text("Pi-hole is unavailable. Try again later.")
+        else:
+            store.audit("pihole_enabled", "")
+            text, keyboard = _pihole_view(status)
+            await query.message.edit_text(text, reply_markup=keyboard)
+        await query.answer()
 
     @router.callback_query(F.data.startswith("container:"))
     async def container_detail(query: CallbackQuery) -> None:
@@ -208,15 +374,34 @@ def create_dispatcher(config: Config, store: Store, monitor: Monitor) -> Dispatc
     return dispatcher
 
 
-async def run_bot(config: Config, store: Store, monitor: Monitor) -> None:
-    bot = Bot(config.token, default=DefaultBotProperties(parse_mode="HTML"))
-    dispatcher = create_dispatcher(config, store, monitor)
-    task = asyncio.create_task(monitor.run(lambda text: bot.send_message(config.allowed_user_id, text)))
+async def run_bot(
+    config: Config,
+    store: Store,
+    monitor: Monitor,
+    pihole: PiholeClient | None = None,
+) -> None:
+    bot: Bot | None = None
+    task: asyncio.Task[None] | None = None
     try:
+        bot = Bot(config.token, default=DefaultBotProperties(parse_mode="HTML"))
+        dispatcher = create_dispatcher(config, store, monitor, pihole)
+        task = asyncio.create_task(
+            monitor.run(lambda text: bot.send_message(config.allowed_user_id, text))
+        )
         await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
     finally:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
-        await monitor.close()
-        await bot.session.close()
+        try:
+            if task is not None:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+        finally:
+            try:
+                await monitor.close()
+            finally:
+                try:
+                    if pihole is not None:
+                        await pihole.close()
+                finally:
+                    if bot is not None:
+                        await bot.session.close()

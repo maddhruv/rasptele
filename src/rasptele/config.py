@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import isfinite
 from pathlib import Path
 from typing import Any
@@ -23,6 +23,12 @@ class AlertConfig:
 
 
 @dataclass(frozen=True)
+class PiholeConfig:
+    url: str
+    password: str = field(repr=False)
+
+
+@dataclass(frozen=True)
 class Config:
     token: str
     allowed_user_id: int
@@ -33,6 +39,7 @@ class Config:
     docker_guard_url: str
     restart_allowed: frozenset[str]
     alerts: AlertConfig
+    pihole: PiholeConfig | None = None
 
 
 def _positive_int(value: Any, name: str) -> int:
@@ -60,8 +67,24 @@ def _positive_float(value: Any, name: str, *, maximum: float | None = None) -> f
     return result
 
 
-def load_config(path: str | Path, *, require_telegram: bool = True) -> Config:
+def _http_url(value: Any, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigurationError(f"{name} must be an HTTP URL")
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ConfigurationError(f"{name} must be an HTTP URL")
+    return value.rstrip("/")
+
+
+def load_config(
+    path: str | Path,
+    *,
+    require_telegram: bool = True,
+    require_integration_secrets: bool | None = None,
+) -> Config:
     """Load YAML settings and, for the bot, required environment secrets."""
+    if require_integration_secrets is None:
+        require_integration_secrets = require_telegram
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     user_id = os.environ.get("TELEGRAM_ALLOWED_USER_ID", "").strip()
     if require_telegram and not token:
@@ -90,8 +113,11 @@ def load_config(path: str | Path, *, require_telegram: bool = True) -> Config:
 
     alerts = raw.get("alerts", {})
     containers = raw.get("containers", {})
+    integrations = raw.get("integrations", {})
     if not isinstance(alerts, dict) or not isinstance(containers, dict):
         raise ConfigurationError("alerts and containers must be mappings")
+    if not isinstance(integrations, dict):
+        raise ConfigurationError("integrations must be a mapping")
     names = containers.get("restart_allowed", [])
     if not isinstance(names, list) or not all(
         isinstance(item, str) and item and item.strip() == item for item in names
@@ -101,14 +127,23 @@ def load_config(path: str | Path, *, require_telegram: bool = True) -> Config:
     disk = _positive_float(alerts.get("disk_percent", 90), "alerts.disk_percent", maximum=100)
     temp = _positive_float(alerts.get("temperature_celsius", 80), "alerts.temperature_celsius")
     database_path = raw.get("database_path", "/data/rasptele.sqlite3")
-    docker_guard_url = raw.get("docker_guard_url", "http://docker-guard:8080")
+    docker_guard_url = _http_url(
+        raw.get("docker_guard_url", "http://docker-guard:8080"), "docker_guard_url"
+    )
     if not isinstance(database_path, str) or not database_path.strip():
         raise ConfigurationError("database_path must be a non-empty string")
-    if not isinstance(docker_guard_url, str):
-        raise ConfigurationError("docker_guard_url must be an HTTP URL")
-    parsed_guard_url = urlsplit(docker_guard_url)
-    if parsed_guard_url.scheme not in {"http", "https"} or not parsed_guard_url.netloc:
-        raise ConfigurationError("docker_guard_url must be an HTTP URL")
+
+    pihole: PiholeConfig | None = None
+    if "pihole" in integrations:
+        pihole_raw = integrations["pihole"]
+        if not isinstance(pihole_raw, dict):
+            raise ConfigurationError("integrations.pihole must be a mapping")
+        pihole_url = _http_url(pihole_raw.get("url"), "integrations.pihole.url")
+        pihole_password = os.environ.get("PIHOLE_PASSWORD", "").strip()
+        if require_integration_secrets and not pihole_password:
+            raise ConfigurationError("PIHOLE_PASSWORD is required when Pi-hole is configured")
+        pihole = PiholeConfig(url=pihole_url, password=pihole_password)
+
     return Config(
         token=token,
         allowed_user_id=allowed_user_id,
@@ -118,7 +153,8 @@ def load_config(path: str | Path, *, require_telegram: bool = True) -> Config:
             raw.get("reminder_interval_minutes", 30), "reminder interval"
         ),
         audit_retention_days=_positive_int(raw.get("audit_retention_days", 90), "audit retention"),
-        docker_guard_url=docker_guard_url.rstrip("/"),
+        docker_guard_url=docker_guard_url,
         restart_allowed=frozenset(names),
         alerts=AlertConfig(disk_percent=disk, temperature_celsius=temp),
+        pihole=pihole,
     )
