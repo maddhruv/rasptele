@@ -1,6 +1,6 @@
 services:
   rasptele:
-    image: ghcr.io/maddhruv/rasptele:0.1.1
+    image: ghcr.io/maddhruv/rasptele:0.2.0
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?required}
       TELEGRAM_ALLOWED_USER_ID: ${TELEGRAM_ALLOWED_USER_ID:?required}
@@ -19,7 +19,7 @@ services:
     restart: unless-stopped
 
   docker-guard:
-    image: ghcr.io/maddhruv/rasptele:0.1.1
+    image: ghcr.io/maddhruv/rasptele:0.2.0
     command: ["--guard", "--config", "/config/config.yaml"]
     volumes:
       - /opt/rasptele/config.yaml:/config/config.yaml:ro
@@ -27,7 +27,7 @@ services:
     restart: unless-stopped
 
   rasptele-watchdog:
-    image: ghcr.io/maddhruv/rasptele:0.1.1
+    image: ghcr.io/maddhruv/rasptele:0.2.0
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?required}
       TELEGRAM_ALLOWED_USER_ID: ${TELEGRAM_ALLOWED_USER_ID:?required}
