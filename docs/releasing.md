@@ -10,11 +10,10 @@ Do not edit released sections. They are the permanent source for GitHub Release 
 
 ## Install the release tooling
 
-Releases require Node.js 20.19 or newer, npm, Python 3.11 or newer, and maintainer access to `maddhruv/rasptele`.
+Releases require Node.js 20.19 or newer, npm, and maintainer access to `maddhruv/rasptele`.
 
 ```bash
 npm ci
-python -m pip install -e .
 ```
 
 Set a GitHub token that can create releases for the repository:
@@ -45,14 +44,14 @@ Run release-it with the reviewed version:
 npm run release -- 0.2.0
 ```
 
-Release-it runs the tests and then:
+Release-it then:
 
 - Moves `Unreleased` into a dated release section and updates comparison links.
 - Updates `package.json`, `package-lock.json`, `pyproject.toml`, `src/rasptele/__init__.py`, and all Compose image tags.
 - Creates and pushes a release commit and annotated `v0.2.0` tag.
 - Creates a draft GitHub Release using the exact changelog section as its notes.
 
-The pushed tag starts the `Release` GitHub Actions workflow. After tests, Compose validation, the container build, and the vulnerability scan pass, it publishes these multi-architecture images:
+The pushed tag starts the `Release` GitHub Actions workflow. The workflow runs the Python tests and version-consistency checks before Compose validation, the container build, and the vulnerability scan. Only after those checks pass does it publish these multi-architecture images:
 
 ```text
 ghcr.io/maddhruv/rasptele:0.2.0

@@ -1,8 +1,5 @@
 {
   "$schema": "https://unpkg.com/release-it@20/schema/release-it.json",
-  "hooks": {
-    "after:bump": "python -m unittest discover -s tests -v"
-  },
   "git": {
     "requireBranch": "main",
     "commitMessage": "chore: release v${version}",

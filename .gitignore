@@ -2,6 +2,7 @@
 config.yaml
 data/
 __pycache__/
+.venv/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
