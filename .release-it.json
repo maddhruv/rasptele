@@ -35,6 +35,10 @@
           "type": "text/plain"
         },
         {
+          "file": "README.md",
+          "type": "text/plain"
+        },
+        {
           "file": "docs/getting-started.md",
           "type": "text/plain"
         },

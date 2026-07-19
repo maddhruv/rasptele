@@ -159,6 +159,7 @@ class DeploymentManifestTests(unittest.TestCase):
             output["file"] for output in outputs if output["file"].endswith(".yaml")
         ]
         self.assertEqual(compose_outputs, ["compose.yaml"])
+        self.assertIn("README.md", [output["file"] for output in outputs])
         self.assertIn(
             "docs/getting-started.md", [output["file"] for output in outputs]
         )
