@@ -1,6 +1,6 @@
 # Rasptele configuration reference
 
-Rasptele reads configuration exclusively from environment variables. Docker Compose reads `.env`; Portainer and Coolify provide equivalent environment-variable forms. Invalid values stop the affected service before it connects to Telegram or Docker.
+Rasptele reads configuration from environment variables, with an optional global config file as a fallback for anything not set in the environment. Docker Compose reads `.env`; Portainer and Coolify provide equivalent environment-variable forms. Invalid values stop the affected service before it connects to Telegram or Docker.
 
 | Variable | Required | Default | Consumer | Description |
 | --- | --- | --- | --- | --- |
@@ -27,6 +27,17 @@ PIHOLE_PASSWORD=<APPLICATION_PASSWORD>
 ```
 
 Setting only one variable is an error. HTTP sends the application password without transport encryption, so use it only on a trusted local network. `/pihole` reports live metrics and provides confirmed temporary disable and immediate enable controls.
+
+## Global config file
+
+Any variable above can instead be set once in `/data/rasptele.toml`, which lives on the same volume as the sqlite database and survives image updates. Environment variables always win if a key is set in both places.
+
+```toml
+RASPTELE_MONITOR_INTERVAL_SECONDS = 60
+RASPTELE_RESTART_ALLOWED = "pihole,jellyfin"
+```
+
+A missing file is not an error; a malformed one stops the affected service.
 
 ## Process modes
 

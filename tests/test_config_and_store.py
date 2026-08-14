@@ -172,6 +172,49 @@ class ConfigTests(unittest.TestCase):
 
         self.assertNotIn(password, repr(config))
 
+    def test_reads_operational_settings_from_global_config_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "rasptele.toml"
+            config_path.write_text('RASPTELE_MONITOR_INTERVAL_SECONDS = 15\nRASPTELE_RESTART_ALLOWED = "pihole"\n')
+            with patch.dict(os.environ, self.telegram_environment, clear=True), patch(
+                "rasptele.config.CONFIG_FILE_PATH", str(config_path)
+            ):
+                config = load_config()
+
+        self.assertEqual(config.monitor_interval_seconds, 15)
+        self.assertEqual(config.restart_allowed, frozenset({"pihole"}))
+
+    def test_environment_variable_overrides_global_config_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "rasptele.toml"
+            config_path.write_text("RASPTELE_MONITOR_INTERVAL_SECONDS = 15\n")
+            environment = {**self.telegram_environment, "RASPTELE_MONITOR_INTERVAL_SECONDS": "20"}
+            with patch.dict(os.environ, environment, clear=True), patch(
+                "rasptele.config.CONFIG_FILE_PATH", str(config_path)
+            ):
+                config = load_config()
+
+        self.assertEqual(config.monitor_interval_seconds, 20)
+
+    def test_malformed_global_config_file_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "rasptele.toml"
+            config_path.write_text("not valid toml {{{")
+            with patch.dict(os.environ, self.telegram_environment, clear=True), patch(
+                "rasptele.config.CONFIG_FILE_PATH", str(config_path)
+            ):
+                with self.assertRaises(ConfigurationError):
+                    load_config()
+
+    def test_missing_global_config_file_falls_back_to_defaults(self):
+        missing_path = "/nonexistent/rasptele.toml"
+        with patch.dict(os.environ, self.telegram_environment, clear=True), patch(
+            "rasptele.config.CONFIG_FILE_PATH", missing_path
+        ):
+            config = load_config()
+
+        self.assertEqual(config.monitor_interval_seconds, 60)
+
 
 class StoreTests(unittest.TestCase):
     def test_confirmation_is_bound_and_single_use(self):
